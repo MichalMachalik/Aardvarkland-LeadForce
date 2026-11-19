@@ -1,3 +1,5 @@
+import { reportDay } from './client-accounts.mjs';
+
 export function populateExample(store, token) {
   const setup = store.bootstrap({
     slug: 'javorova', workspace: 'Javorová projekty', name: 'Adéla Novotná',
@@ -54,5 +56,50 @@ export function populateExample(store, token) {
   });
   const profiles = Object.fromEntries([admin, members.marketing, members.agent, members.care, members.investor]
     .map(({ id, role, name }) => [role, { id, role, name }]));
+  profiles.client = populateClientExample(store, token, admin.id, members.care.id);
   return profiles;
+}
+export function populateClientExample(store, token, adminId, careId) {
+  const session = store.createSession(adminId);
+  try {
+    const admin = store.session(session);
+    if (!admin) return null;
+    const client = store.command(admin, 'create-client', { name: 'Lípové bydlení' }).id;
+    const other = store.command(admin, 'create-client', { name: 'Modřínová výstavba' }).id;
+    const campaigns = [
+      [client, 'Byty pod Lípou', 'Dům Pod Lípou', 'Google Ads', 'LPF-601', '1890'],
+      [client, 'Rezidence U Háje', 'Rezidence U Háje', 'Meta', 'LPF-602', '940'],
+      [client, 'Brandová kampaň', 'Dům Pod Lípou', 'Sklik', 'LPF-603', '0'],
+      [other, 'Ateliéry u Řeky', 'Ateliéry u Řeky', 'Google Ads', 'LPF-699', '4400'],
+    ].map(([client, name, project, source, code, cost]) => {
+      const campaign = store.command(admin, 'create-campaign', { client, name, project, source, code }).id;
+      store.command(admin, 'save-campaign-cost', { campaign, day: reportDay(), cost });
+      return campaign;
+    });
+    const careSession = store.createSession(careId);
+    const care = store.session(careSession);
+    try {
+      for (const [index, fullName, box, handed] of [
+        [0, 'Zuzana Šedá', 'zuzana', true], [0, 'Roman Kadlec', 'roman', true],
+        [1, 'Hana Vítová', 'hana', true], [1, 'Petr Skála', 'petr', false],
+        [3, 'David Koutný', 'david', true],
+      ]) {
+        const { id } = store.command(admin, 'create-lead', { name: fullName, email: box + '@leadforce.example', client_campaign: campaigns[index] });
+        if (!handed || !care) continue;
+        store.command(admin, 'change-stage', { id, version: 1, stage: 'contacted' });
+        store.command(admin, 'change-stage', { id, version: 2, stage: 'qualified' });
+        store.command(admin, 'assign', { id, version: 3, owner: care.id });
+        store.command(care, 'change-stage', { id, version: 4, stage: 'handed' });
+      }
+    } finally {
+      store.signOut(careSession);
+    }
+    const { invite } = store.command(admin, 'invite', { email: 'prehlad@lipove-bydleni.example', role: 'client', client });
+    const raw = store.claimInvite({ token: invite, name: 'Marek Plachý', password: token() });
+    const { id, role, name } = store.session(raw);
+    store.signOut(raw);
+    return { id, role, name };
+  } finally {
+    store.signOut(session);
+  }
 }

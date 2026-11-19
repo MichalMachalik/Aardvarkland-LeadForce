@@ -67,7 +67,7 @@ export function createWorkspaceServer(store, { origin, profiles = null, log = co
   }
 
   async function handler(req, res) {
-    const { pathname } = new URL(req.url, origin);
+    const { pathname, searchParams } = new URL(req.url, origin);
     if (req.method === 'GET' && pathname === '/health') return json(res, 200, { ok: true });
     if (req.method === 'GET' && Object.hasOwn(assets, pathname)) {
       const [file, mime] = assets[pathname];
@@ -102,6 +102,10 @@ export function createWorkspaceServer(store, { origin, profiles = null, log = co
 
     if (req.method === 'GET') {
       if (pathname === '/api/state') return json(res, 200, store.state(actor));
+      if (pathname === '/api/client/report') return json(res, 200, store.clientReport(actor, searchParams));
+      if (pathname === '/api/client/report.csv') return send(res, 200, store.clientReport(actor, searchParams, true), {
+        'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="kampane.csv"',
+      });
       const lead = /^\/api\/leads\/(\d+)$/.exec(pathname);
       if (lead) return json(res, 200, store.leadDetail(actor, lead[1]));
       if (pathname === '/api/export/leads.csv') return send(res, 200, store.exportLeads(actor), {

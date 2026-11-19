@@ -208,6 +208,11 @@ async function blank({ page }) {
   await btn(admin, 'Přihlásit se').click();
   await titled(admin, 'Přehled týmu');
   assert.deepEqual(await admin.locator('.metric dd').allTextContents(), ['0', '0', '0', '0', '0']);
+  await goto(admin, 'Klienti a kampaně');
+  await titled(admin, 'Klienti a kampaně');
+  await admin.getByText('Zatím žádní klienti.').waitFor();
+  await admin.getByText('Zatím žádné klientské kampaně.').waitFor();
+  assert.equal(await btn(admin, 'Uložit denní náklad').count(), 0);
   await goto(admin, 'Uživatelé');
   await titled(admin, 'Uživatelé');
   assert.equal(await admin.locator('tbody tr').count(), 1);
@@ -215,8 +220,87 @@ async function blank({ page }) {
   await titled(admin, 'Přihlášení do pracovního prostoru');
 }
 
+async function clientPortal({ page }) {
+  const client = await page(320);
+  await btn(client, /^Klient ·/).click();
+  await titled(client, 'Klientský přehled');
+  await client.getByText('Zuzana Šedá', { exact: true }).waitFor();
+  assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  assert.equal(await client.getByText('Ateliéry u Řeky', { exact: true }).count(), 0);
+  assert.equal(await client.getByText('David Koutný', { exact: true }).count(), 0);
+  assert.equal(await client.getByText('Petr Skála', { exact: true }).count(), 0);
+  await client.getByLabel('Kampaň', { exact: true }).selectOption({ label: 'Byty pod Lípou · LPF-601' });
+  await btn(client, 'Použít filtry').click();
+  await client.waitForFunction(() => document.querySelector('.client-metrics dd').textContent === '2');
+  assert.deepEqual((await client.locator('.client-metrics dd').allTextContents()).map((text) => text.replace(/\s/g, '')), ['2', '1890Kč', '945Kč']);
+  assert.equal(await client.getByText('Hana Vítová', { exact: true }).count(), 0);
+  const [file] = await Promise.all([
+    client.waitForEvent('download'),
+    client.getByRole('link', { name: 'Stáhnout report CSV' }).click(),
+  ]);
+  const csv = await readFile(await file.path(), 'utf8');
+  assert.match(csv, /"1890,00";"2";"945,00"/);
+  assert.doesNotMatch(csv, /LPF-602|LPF-699|@leadforce/);
+  await set(client, { Od: '2020-02-01', Do: '2020-02-02' });
+  await btn(client, 'Použít filtry').click();
+  await client.getByText('Ve zvoleném období nebyla předána žádná poptávka.').waitFor();
+  await client.getByText('Bez evidence', { exact: true }).waitFor();
+
+  const admin = await page();
+  await btn(admin, /^Správce ·/).click();
+  await titled(admin, 'Přehled týmu');
+  await goto(admin, 'Klienti a kampaně');
+  await titled(admin, 'Klienti a kampaně');
+  await admin.getByRole('row', { name: /Byty pod Lípou · LPF-601/ }).getByRole('button', { name: 'Upravit' }).click();
+  assert.equal(await admin.getByLabel('Náklad v Kč').inputValue(), '1890,00');
+  await set(admin, { 'Náklad v Kč': '2100' });
+  await btn(admin, 'Uložit denní náklad').click();
+  await admin.getByText('Denní náklad uložen.').waitFor();
+  await goto(admin, 'Poptávky');
+  await titled(admin, 'Poptávky');
+  await set(admin, { Jméno: 'Erik Zelený', 'E-mail': 'erik@qa.example' });
+  await admin.getByLabel('Klientská kampaň').selectOption({ label: 'Byty pod Lípou · LPF-601 · Lípové bydlení' });
+  await btn(admin, 'Přidat poptávku').click();
+  await admin.getByRole('link', { name: 'Erik Zelený', exact: true }).waitFor();
+  await client.reload();
+  await titled(client, 'Klientský přehled');
+  assert.equal(await client.getByText('Erik Zelený', { exact: true }).count(), 0);
+
+  await admin.getByRole('link', { name: 'Erik Zelený', exact: true }).click();
+  await titled(admin, 'Erik Zelený');
+  await btn(admin, 'Označit jako kontaktovanou').click();
+  await admin.getByText('Kontaktována', { exact: true }).waitFor();
+  await btn(admin, 'Kvalifikovat').click();
+  await admin.getByText('Kvalifikovaná', { exact: true }).waitFor();
+  await admin.getByLabel('Odpovídá').selectOption({ label: 'Klára Dvořáková' });
+  await btn(admin, 'Přiřadit').click();
+  await admin.locator('.detail-grid dd').filter({ hasText: /^Klára Dvořáková$/ }).waitFor();
+  await btn(admin, 'Předat klientovi').click();
+  await admin.getByText('Předaná', { exact: true }).waitFor();
+  await client.reload();
+  await client.getByText('Erik Zelený', { exact: true }).waitFor();
+  await client.getByRole('row', { name: /Byty pod Lípou LPF-601.*700/ }).waitFor();
+
+  await goto(admin, 'Uživatelé');
+  await titled(admin, 'Uživatelé');
+  await set(admin, { 'E-mail': 'druhy-klient@qa.example' });
+  await admin.getByLabel('Role', { exact: true }).selectOption({ label: 'Klient' });
+  await admin.getByLabel('Klient', { exact: true }).selectOption({ label: 'Modřínová výstavba' });
+  await btn(admin, 'Vytvořit pozvánku').click();
+  const invite = await admin.getByLabel('Odkaz pozvánky').inputValue();
+  const another = await page();
+  await another.goto(invite);
+  await titled(another, 'Přijmout pozvánku');
+  await set(another, { Jméno: 'Jiný klient', 'Nové heslo': 'Testovaci_heslo_2026' });
+  await btn(another, 'Založit účet').click();
+  await titled(another, 'Klientský přehled');
+  await another.getByText('David Koutný', { exact: true }).waitFor();
+  assert.equal(await another.getByText('Erik Zelený', { exact: true }).count(), 0);
+}
+
 async function published(context) {
   await demo(context);
+  await clientPortal(context);
   const isolated = await context.page(1366, true);
   await btn(isolated, /^Správce ·/).click();
   await goto(isolated, 'Poptávky');
@@ -244,7 +328,7 @@ async function published(context) {
 
 const check = process.env.TEST_URL
   ? exerciseBrowser(process.env.TEST_URL, [], published, true)
-  : openCase(true, demo).then(() => openCase(false, blank));
+  : openCase(true, async (context) => { await demo(context); await clientPortal(context); }).then(() => openCase(false, blank));
 check.then(() => {
-  console.log('PASS workspace browser: roles, queue, notes, handoff and invite, tasks, portfolio, draft/publication/receipt and empty production login');
+  console.log('PASS workspace, client report, campaign cost correction, client invites and scoped handoffs');
 }).catch((error) => { console.error(error); process.exitCode = 1; });

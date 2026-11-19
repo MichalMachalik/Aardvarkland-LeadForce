@@ -1,7 +1,7 @@
 import initSqlJs from 'sql.js';
 import schema from '../schema.sql';
 import { createStore } from '../workspace-store.mjs';
-import { populateExample } from '../demo.mjs';
+import { populateClientExample, populateExample } from '../demo.mjs';
 import { Failure } from '../validation.mjs';
 import * as credentials from './credentials.mjs';
 import { sqliteConnection } from './sqlite.mjs';
@@ -16,7 +16,8 @@ const ready = Promise.all([initSqlJs({ locateFile: () => new URL('./workspace-sq
 const result = (body, status = 200) => ({ status, body });
 const sessionResult = (session) => ({ ...result({ ok: true }), session });
 
-function handle(store, profiles, { path, method, body, session, csrf }) {
+function handle(store, profiles, { path: url, method, body, session, csrf }) {
+  const { pathname: path, searchParams } = new URL(url, 'https://workspace.example');
   if (method === 'GET' && path === '/api/config') {
     return result({ choices: Object.values(profiles).map(({ role, name }) => ({ role, name })) });
   }
@@ -41,6 +42,8 @@ function handle(store, profiles, { path, method, body, session, csrf }) {
   if (!actor) throw new Failure(401, 'Přihlaste se do pracovního prostoru.');
   if (method === 'GET') {
     if (path === '/api/state') return result(store.state(actor));
+    if (path === '/api/client/report') return result(store.clientReport(actor, searchParams));
+    if (path === '/api/client/report.csv') return { ...result(store.clientReport(actor, searchParams, true)), contentType: 'text/csv; charset=utf-8' };
     if (path === '/api/export/leads.csv') return { ...result(store.exportLeads(actor)), contentType: 'text/csv; charset=utf-8' };
     const lead = /^\/api\/leads\/(\d+)$/.exec(path);
     if (lead) return result(store.leadDetail(actor, lead[1]));
@@ -78,11 +81,15 @@ async function transact(input) {
       try {
         const store = createStore(sqliteConnection(sqlite), schema, credentials);
         const profiles = record?.profiles ?? populateExample(store, credentials.token);
+        if (record && store.upgraded && !profiles.client) {
+          const profile = populateClientExample(store, credentials.token, profiles.admin.id, profiles.care.id);
+          if (profile) profiles.client = profile;
+        }
         try { reply = handle(store, profiles, input); } catch (error) {
           if (!(error instanceof Failure)) throw error;
           reply = result({ error: error.message }, error.status);
         }
-        if (!record || (input.method === 'POST' && reply.status < 400)) {
+        if (!record || store.upgraded || (input.method === 'POST' && reply.status < 400)) {
           records.put({ profiles, snapshot: sqlite.export() }, 'current');
         }
       } catch (error) {

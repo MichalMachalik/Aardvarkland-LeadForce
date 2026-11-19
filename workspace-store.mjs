@@ -1,6 +1,8 @@
-import { Failure, day, email, id, password, text, validToken } from './validation.mjs';
+import { clientAccounts, reportDay } from './client-accounts.mjs';
+import { initializeSchema } from './schema.mjs';
+import { amount, campaignCode, csv, Failure, day, email, id, password, text, validToken } from './validation.mjs';
 
-const roles = ['admin', 'marketing', 'agent', 'care', 'investor'];
+const roles = ['admin', 'marketing', 'agent', 'care', 'investor', 'client'];
 const stages = { new: 'Nová', contacted: 'Kontaktována', qualified: 'Kvalifikovaná', handed: 'Předaná', closed: 'Uzavřená' };
 const transitions = {
   agent: { new: ['contacted', 'closed'], contacted: ['qualified', 'closed'] },
@@ -18,20 +20,13 @@ function slug(value) {
   return result;
 }
 
-function amount(value) {
-  const raw = String(value ?? '').replace(/[ \u00a0\u202f]/g, '').replace(',', '.');
-  if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(raw)) throw new Failure(422, 'Zadejte částku v Kč s nejvýše dvěma desetinnými místy.');
-  const [whole, fraction = ''] = raw.split('.');
-  return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-}
-
 export function createStore(db, schema, { hash, passwordDigest, passwordMatches, token }) {
-  db.exec(schema);
+  const upgraded = initializeSchema(db, schema);
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
-  const transaction = (work) => {
-    db.exec('BEGIN IMMEDIATE');
+  const transaction = (work, begin = 'BEGIN IMMEDIATE') => {
+    db.exec(begin);
     try {
       const result = work();
       db.exec('COMMIT');
@@ -45,6 +40,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
   const event = (actor, action, detail = '', lead = null) =>
     run('INSERT INTO activity (workspace_id,actor_id,lead_id,action,detail,created_at) VALUES (?,?,?,?,?,?)',
       actor.workspace_id, actor.id, lead, action, detail, now());
+  const clients = clientAccounts({ get, all, run, event, allow });
   const publicActor = ({ id: userId, name, email: address, role, slug: org, workspace }) =>
     ({ id: userId, name, email: address, role, slug: org, workspace });
 
@@ -121,6 +117,11 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       if (!row) throw new Failure(404, 'Pozvánka vypršela nebo již byla použita.');
       const user = run('INSERT INTO users (workspace_id,email,name,password,role) VALUES (?,?,?,?,?)',
         row.workspace_id, row.email, name, digest, row.role).lastInsertRowid;
+      if (row.role === 'client') {
+        const client = get('SELECT client_id FROM client_invitations WHERE workspace_id=? AND token_hash=?', row.workspace_id, row.token_hash);
+        if (!client) throw new Failure(404, 'Klientská pozvánka už není dostupná.');
+        run('INSERT INTO client_users (workspace_id,user_id,client_id) VALUES (?,?,?)', row.workspace_id, user, client.client_id);
+      }
       if (row.lead_id !== null) {
         const linked = run("UPDATE leads SET investor_id=?,version=version+1 WHERE id=? AND workspace_id=? AND email=? AND stage='handed' AND investor_id IS NULL",
           user, row.lead_id, row.workspace_id, row.email);
@@ -163,7 +164,11 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     if (!lead) missing();
     const notes = all('SELECT n.id,n.body,n.created_at,u.name AS author FROM notes n JOIN users u ON u.id=n.author_id WHERE n.workspace_id=? AND n.lead_id=? ORDER BY n.id DESC LIMIT 200', actor.workspace_id, lead.id);
     const activity = all('SELECT a.action,a.detail,a.created_at,u.name AS actor FROM activity a JOIN users u ON u.id=a.actor_id WHERE a.workspace_id=? AND a.lead_id=? ORDER BY a.id DESC LIMIT 200', actor.workspace_id, lead.id);
-    return { lead, notes, activity, recipients: noteRecipients(actor, lead) };
+    const campaign = get(`SELECT c.id,c.name,a.name AS client FROM client_leads d
+      JOIN client_campaigns c ON c.workspace_id=d.workspace_id AND c.id=d.campaign_id
+      JOIN clients a ON a.workspace_id=c.workspace_id AND a.id=c.client_id
+      WHERE d.workspace_id=? AND d.lead_id=?`, actor.workspace_id, lead.id);
+    return { lead, notes, activity, campaign, recipients: noteRecipients(actor, lead) };
   }
 
   function noteRecipients(actor, lead) {
@@ -199,11 +204,12 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     return row;
   }
 
-  function makeInvite(actor, address, role, lead = null) {
+  function makeInvite(actor, address, role, lead = null, client = null) {
     const raw = token();
     run('DELETE FROM invitations WHERE workspace_id=? AND email=? AND used=0', actor.workspace_id, address);
     run('INSERT INTO invitations (token_hash,workspace_id,email,role,expires,lead_id) VALUES (?,?,?,?,?,?)',
       hash(raw), actor.workspace_id, address, role, Date.now() + 24 * 60 * 60 * 1000, lead);
+    if (client) run('INSERT INTO client_invitations (workspace_id,token_hash,client_id) VALUES (?,?,?)', actor.workspace_id, hash(raw), client);
     event(actor, 'invite_created', role, lead);
     return { invite: raw };
   }
@@ -211,6 +217,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
   function state(actor) {
     const { workspace_id: org, id: userId, role } = actor;
     const base = { user: publicActor(actor), csrf: actor.csrf };
+    if (role === 'client') return { ...base, client: clients.clientName(actor).name };
     if (role === 'investor') return {
       ...base,
       positions: all('SELECT id,project,principal_cents,maturity,status FROM positions WHERE workspace_id=? AND investor_id=? ORDER BY maturity', org, userId),
@@ -220,6 +227,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     const [scope, args] = leadScope(actor);
     const stagesInScope = all('SELECT l.stage,count(*) AS total FROM leads l LEFT JOIN users u ON u.id=l.owner_id AND u.workspace_id=l.workspace_id WHERE l.workspace_id=? ' + scope + ' GROUP BY l.stage', org, ...args);
     const result = { ...base, leads, stages: stagesInScope };
+    if (role === 'admin' || role === 'marketing') result.clientManagement = clients.management(actor);
     if (role === 'marketing') return result;
     result.notifications = notifications(actor);
     result.tasks = all('SELECT t.*,l.name AS lead,u.name AS owner FROM tasks t JOIN leads l ON l.id=t.lead_id JOIN users u ON u.id=t.owner_id WHERE t.workspace_id=? AND (?=1 OR t.owner_id=?) ORDER BY t.done_at IS NOT NULL,t.due,t.id LIMIT 500',
@@ -230,25 +238,40 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       result.messages = all('SELECT m.*,u.name AS investor FROM messages m JOIN users u ON u.id=m.investor_id WHERE m.workspace_id=? ORDER BY m.id DESC LIMIT 500', org);
     }
     if (role === 'admin') {
-      result.users = all('SELECT id,name,email,role,enabled FROM users WHERE workspace_id=? ORDER BY enabled DESC,name', org);
+      result.users = all(`SELECT u.id,u.name,u.email,u.role,u.enabled,c.name AS client FROM users u
+        LEFT JOIN client_users m ON m.workspace_id=u.workspace_id AND m.user_id=u.id
+        LEFT JOIN clients c ON c.workspace_id=m.workspace_id AND c.id=m.client_id
+        WHERE u.workspace_id=? ORDER BY u.enabled DESC,u.name`, org);
       result.activity = all('SELECT a.action,a.detail,a.lead_id,a.created_at,u.name AS actor FROM activity a JOIN users u ON u.id=a.actor_id WHERE a.workspace_id=? ORDER BY a.id DESC LIMIT 100', org);
     }
     return result;
   }
 
   const actions = {
+    ...clients.actions,
     'create-lead'(actor, body) {
       allow(actor, 'admin', 'marketing');
       const name = text(body.name, 'Jméno', 120);
       const address = email(body.email);
-      const project = text(body.project, 'Projekt');
-      const source = text(body.source, 'Kanál', 65);
-      const campaign = text(body.campaign, 'ID kampaně', 64);
-      if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(campaign)) throw new Failure(422, 'ID kampaně může obsahovat písmena, čísla, spojovník a podtržítko.');
+      const managed = body.client_campaign ? clients.campaign(actor, body.client_campaign) : null;
+      const project = managed?.project ?? text(body.project, 'Projekt');
+      const source = managed?.source ?? text(body.source, 'Kanál', 65);
+      const campaign = managed?.code ?? campaignCode(body.campaign);
       const { lastInsertRowid } = run('INSERT INTO leads (workspace_id,name,email,project,source,campaign,created_at) VALUES (?,?,?,?,?,?,?)',
         actor.workspace_id, name, address, project, source, campaign, now());
+      if (managed) run('INSERT INTO client_leads (workspace_id,lead_id,campaign_id) VALUES (?,?,?)', actor.workspace_id, lastInsertRowid, managed.id);
       event(actor, 'lead_created', '', lastInsertRowid);
       return { id: lastInsertRowid };
+    },
+    'attach-campaign'(actor, body) {
+      allow(actor, 'admin');
+      const lead = ownedLead(actor, body.id);
+      if (lead.handed_at || lead.stage === 'closed') throw new Failure(409, 'Kampaň lze změnit pouze před předáním nebo uzavřením.');
+      const campaign = clients.campaign(actor, body.campaign);
+      updateLead(actor, lead, body.version, 'project=?,source=?,campaign=?', campaign.project, campaign.source, campaign.code);
+      run(`INSERT INTO client_leads (workspace_id,lead_id,campaign_id) VALUES (?,?,?)
+        ON CONFLICT(workspace_id,lead_id) DO UPDATE SET campaign_id=excluded.campaign_id`, actor.workspace_id, lead.id, campaign.id);
+      event(actor, 'campaign_attached', campaign.name + ' · ' + campaign.code, lead.id);
     },
     'assign'(actor, body) {
       allow(actor, 'admin', 'agent', 'care');
@@ -269,7 +292,11 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       const allowed = actor.role === 'admin' ? (transitions.agent[row.stage] || transitions.care[row.stage] || []) : (transitions[actor.role][row.stage] || []);
       if (!allowed.includes(body.stage)) throw new Failure(409, 'Tato změna stavu v aktuální fázi není dostupná.');
       if (body.stage === 'handed' && row.owner_role !== 'care') throw new Failure(409, 'Před předáním přiřaďte odpovědného člověka z péče.');
-      updateLead(actor, row, body.version, 'stage=?, handed_at=?', body.stage, body.stage === 'handed' ? now() : row.handed_at);
+      const handedAt = body.stage === 'handed' ? now() : row.handed_at;
+      updateLead(actor, row, body.version, 'stage=?, handed_at=?', body.stage, handedAt);
+      if (body.stage === 'handed') {
+        run('UPDATE client_leads SET handed_day=? WHERE workspace_id=? AND lead_id=?', reportDay(new Date(handedAt)), actor.workspace_id, row.id);
+      }
       event(actor, 'stage_changed', stages[row.stage] + ' → ' + stages[body.stage], row.id);
     },
     'add-note'(actor, body) {
@@ -311,7 +338,8 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       const address = email(body.email);
       if (!roles.includes(body.role)) throw new Failure(422, 'Vyberte roli.');
       if (get('SELECT id FROM users WHERE workspace_id=? AND email=?', actor.workspace_id, address)) throw new Failure(409, 'Tento e-mail již má účet.');
-      return makeInvite(actor, address, body.role);
+      const client = body.role === 'client' ? clients.requireClient(actor, body.client).id : null;
+      return makeInvite(actor, address, body.role, null, client);
     },
     'link-investor'(actor, body) {
       allow(actor, 'admin', 'care');
@@ -403,16 +431,13 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
   function exportLeads(actor) {
     allow(actor, 'admin', 'marketing');
     const rows = all('SELECT id,created_at,source,campaign,stage,handed_at FROM leads WHERE workspace_id=? ORDER BY id', actor.workspace_id);
-    const escape = (value) => {
-      const normal = String(value ?? '');
-      return '"' + (/^[\s\uFEFF]*[=+\-@]/.test(normal) ? "'" + normal : normal).replaceAll('"', '""') + '"';
-    };
-    return '\uFEFF' + [
+    return csv([
       ['lead_id', 'created_date', 'source', 'campaign_id', 'status', 'handed_off_date'],
       ...rows.map((row) => ['CRM-' + row.id, row.created_at.slice(0, 10), row.source, row.campaign,
         row.handed_at ? stages.qualified : stages[row.stage], row.handed_at?.slice(0, 10)]),
-    ].map((cells) => cells.map(escape).join(';')).join('\r\n') + '\r\n';
+    ]);
   }
 
-  return { bootstrap, signIn, signOut, session, changePassword, claimInvite, state, leadDetail, command, exportLeads, createSession, close: () => db.close() };
+  return { upgraded, bootstrap, signIn, signOut, session, changePassword, claimInvite, state, leadDetail, command,
+    exportLeads, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'), createSession, close: () => db.close() };
 }

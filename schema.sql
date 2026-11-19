@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
   email TEXT NOT NULL COLLATE NOCASE, name TEXT NOT NULL, password TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin','marketing','agent','care','investor')),
+  role TEXT NOT NULL CHECK (role IN ('admin','marketing','agent','care','investor','client')),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
   UNIQUE (workspace_id,email), UNIQUE (workspace_id,id)
 ) STRICT;
@@ -80,3 +80,40 @@ CREATE TABLE IF NOT EXISTS activity (
   FOREIGN KEY (workspace_id,lead_id) REFERENCES leads(workspace_id,id)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS activity_feed ON activity(workspace_id,lead_id,id);
+
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+  name TEXT NOT NULL COLLATE NOCASE,
+  UNIQUE (workspace_id,id), UNIQUE (workspace_id,name)
+) STRICT;
+CREATE TABLE IF NOT EXISTS client_users (
+  workspace_id INTEGER NOT NULL, user_id INTEGER NOT NULL PRIMARY KEY, client_id INTEGER NOT NULL,
+  FOREIGN KEY (workspace_id,user_id) REFERENCES users(workspace_id,id),
+  FOREIGN KEY (workspace_id,client_id) REFERENCES clients(workspace_id,id)
+) STRICT;
+CREATE UNIQUE INDEX IF NOT EXISTS invitations_tenant_token ON invitations(workspace_id,token_hash);
+CREATE TABLE IF NOT EXISTS client_invitations (
+  workspace_id INTEGER NOT NULL, token_hash TEXT NOT NULL PRIMARY KEY, client_id INTEGER NOT NULL,
+  FOREIGN KEY (workspace_id,token_hash) REFERENCES invitations(workspace_id,token_hash) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id,client_id) REFERENCES clients(workspace_id,id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS client_campaigns (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, client_id INTEGER NOT NULL,
+  name TEXT NOT NULL, project TEXT NOT NULL, source TEXT NOT NULL, code TEXT NOT NULL COLLATE NOCASE,
+  UNIQUE (workspace_id,id), UNIQUE (workspace_id,source,code),
+  FOREIGN KEY (workspace_id,client_id) REFERENCES clients(workspace_id,id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS client_campaigns_client ON client_campaigns(workspace_id,client_id,id);
+CREATE TABLE IF NOT EXISTS client_campaign_costs (
+  workspace_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, day TEXT NOT NULL,
+  cost_cents INTEGER NOT NULL CHECK (cost_cents BETWEEN 0 AND 100000000000),
+  PRIMARY KEY (workspace_id,campaign_id,day),
+  FOREIGN KEY (workspace_id,campaign_id) REFERENCES client_campaigns(workspace_id,id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS client_leads (
+  workspace_id INTEGER NOT NULL, lead_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, handed_day TEXT,
+  PRIMARY KEY (workspace_id,lead_id),
+  FOREIGN KEY (workspace_id,lead_id) REFERENCES leads(workspace_id,id),
+  FOREIGN KEY (workspace_id,campaign_id) REFERENCES client_campaigns(workspace_id,id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS client_leads_reports ON client_leads(workspace_id,campaign_id,handed_day,lead_id);

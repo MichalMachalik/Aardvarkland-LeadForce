@@ -41,3 +41,24 @@ export function day(value) {
   }
   return raw;
 }
+
+export function amount(value) {
+  const raw = String(value ?? '').replace(/[ \u00a0\u202f]/g, '').replace(',', '.');
+  if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(raw)) throw new Failure(422, 'Zadejte částku v Kč s nejvýše dvěma desetinnými místy.');
+  const [whole, fraction = ''] = raw.split('.');
+  return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+}
+
+export function campaignCode(value) {
+  const code = text(value, 'ID kampaně', 64);
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(code)) throw new Failure(422, 'ID kampaně může obsahovat písmena, čísla, spojovník a podtržítko.');
+  return code;
+}
+
+export function csv(rows) {
+  const quote = (value) => {
+    const text = String(value ?? '');
+    return '"' + (/^[\s\uFEFF]*[=+\-@]/.test(text) ? "'" + text : text).replaceAll('"', '""') + '"';
+  };
+  return '\uFEFF' + rows.map((row) => row.map(quote).join(';')).join('\r\n') + '\r\n';
+}

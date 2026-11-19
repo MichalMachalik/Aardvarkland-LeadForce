@@ -2,7 +2,7 @@ import { browserDemo, request } from './transport.js';
 
 const $ = (id) => document.getElementById(id);
 const screen = $('screen');
-const roleNames = { admin: 'Správce', marketing: 'Marketing', agent: 'Kvalifikace', care: 'Péče', investor: 'Investor' };
+const roleNames = { admin: 'Správce', marketing: 'Marketing', agent: 'Kvalifikace', care: 'Péče', investor: 'Investor', client: 'Klient' };
 const stageNames = { new: 'Nová', contacted: 'Kontaktována', qualified: 'Kvalifikovaná', handed: 'Předaná', closed: 'Uzavřená' };
 const events = {
   workspace_created: 'Založení organizace', lead_created: 'Založení poptávky', lead_assigned: 'Přiřazení poptávky',
@@ -11,16 +11,20 @@ const events = {
   user_activated: 'Opětovná aktivace účtu', user_disabled: 'Deaktivace účtu',
   position_created: 'Založení pozice', position_closed: 'Uzavření pozice',
   message_drafted: 'Koncept zprávy', message_published: 'Zveřejnění zprávy', password_changed: 'Změna hesla',
+  client_created: 'Založení klienta', campaign_created: 'Založení kampaně', campaign_cost_saved: 'Změna nákladu kampaně',
+  campaign_attached: 'Přiřazení klientské kampaně',
 };
 const available = {
-  admin: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
-  marketing: ['prehled', 'poptavky', 'ucet'],
+  admin: ['prehled', 'poptavky', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
+  marketing: ['prehled', 'poptavky', 'kampane', 'ucet'],
   agent: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'ucet'],
   care: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
   investor: ['prehled', 'portfolio', 'schranka', 'ucet'],
+  client: ['prehled', 'ucet'],
 };
 const titles = {
   prehled: ['Přehled', 'grid'], poptavky: ['Poptávky', 'list'], ukoly: ['Úkoly', 'check'],
+  kampane: ['Klienti a kampaně', 'bag'],
   upozorneni: ['Upozornění', 'mail'], investori: ['Investoři', 'bag'], komunikace: ['Zprávy pro investory', 'mail'],
   uzivatele: ['Uživatelé', 'user'], historie: ['Historie změn', 'clock'],
   portfolio: ['Portfolio', 'bag'], schranka: ['Zprávy', 'mail'], ucet: ['Můj účet', 'user'],
@@ -30,10 +34,13 @@ const dateOnly = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'UTC' });
 const dateTime = new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
 const formatDate = (value) => value ? (value.length === 10 ? dateOnly.format(new Date(value + 'T00:00:00Z')) : dateTime.format(new Date(value))) : '—';
 const localDate = () => new Intl.DateTimeFormat('sv-SE').format(new Date());
+const reportDate = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Prague' }).format(new Date());
+const czk = (cents, emptyValue = '—') => cents === null ? emptyValue : kcz.format(cents / 100);
 let config;
 let state;
 let renderNumber = 0;
 let busy = false;
+let clientQuery = '';
 
 function node(tag, attrs, ...children) {
   const el = document.createElement(tag);
@@ -88,6 +95,17 @@ function form(label, fields, submit) {
       .finally(() => { if (submitter) submitter.disabled = false; });
   });
   return element;
+}
+
+function conditionalFields(trigger, fields, condition) {
+  const group = node('fieldset', { className: 'field-group' }, fields);
+  const update = () => {
+    group.hidden = !condition(trigger.value);
+    group.disabled = group.hidden;
+  };
+  trigger.addEventListener('change', update);
+  update();
+  return group;
 }
 
 function notice(message, error = false) {
@@ -188,15 +206,15 @@ function loginScreen(invitation) {
   return login;
 }
 
-function exportLeadsLink() {
-  const exportLink = link('Export poptávek CSV', './api/export/leads.csv', { className: 'button secondary' });
+function csvLink(label, path, filename) {
+  const exportLink = link(label, '.' + path, { className: 'button secondary' });
   if (browserDemo) exportLink.addEventListener('click', (event) => {
     event.preventDefault();
     void run(async () => {
-      const response = await request('/api/export/leads.csv');
+      const response = await request(path);
       if (!response.ok) throw new Error((await response.json()).error);
       const blob = URL.createObjectURL(await response.blob());
-      const download = node('a', { href: blob, download: 'poptavky.csv' });
+      const download = node('a', { href: blob, download: filename });
       document.body.append(download);
       download.click();
       download.remove();
@@ -240,7 +258,7 @@ function overview() {
     output.push(card('Kampaně', actions(
       link('Kontrola odkazů', './tools/kontrola-pred-spustenim/index.html', { className: 'button secondary', target: '_blank', rel: 'noopener' }),
       link('Audit kampaní', './tools/audit-kampani/index.html', { className: 'button secondary', target: '_blank', rel: 'noopener' }),
-      exportLeadsLink(),
+      csvLink('Export poptávek CSV', '/api/export/leads.csv', 'poptavky.csv'),
     )));
   }
   return output;
@@ -266,10 +284,15 @@ function leadList() {
   filter.addEventListener('change', draw);
   draw();
   const output = [heading('Poptávky'), node('section', { className: 'card queue' }, actions(query, filter), list)];
-  if (['admin', 'marketing'].includes(state.user.role)) {
+  if (state.clientManagement) {
+    const options = campaignOptions(state.clientManagement.campaigns);
+    const choice = field('Klientská kampaň', 'client_campaign', options, { required: false });
+    choice.querySelector('option').textContent = 'Zadat vlastní zdroj';
+    const manual = [field('Projekt', 'project'), field('Kanál', 'source'),
+      field('ID kampaně', 'campaign', 'text', { maxlength: 64, placeholder: 'G-301' })];
+    const campaignFields = options.length ? [choice, conditionalFields(choice.querySelector('select'), manual, (value) => !value)] : manual;
     output.push(card('Nová poptávka', form('Přidat poptávku', [
-      field('Jméno', 'name'), field('E-mail', 'email', 'email'), field('Projekt', 'project'),
-      field('Kanál', 'source'), field('ID kampaně', 'campaign', 'text', { maxlength: 64, placeholder: 'G-301' }),
+      field('Jméno', 'name'), field('E-mail', 'email', 'email'), campaignFields,
     ], (data) => command('create-lead', data))));
   }
   return output;
@@ -283,7 +306,7 @@ function timeline(items) {
 }
 
 async function leadView(id) {
-  const { lead, notes, activity, recipients } = await api('/api/leads/' + id);
+  const { lead, notes, activity, recipients, campaign } = await api('/api/leads/' + id);
   const { role } = state.user;
   const owner = role === 'admin' || lead.owner_id === state.user.id;
   const move = { new: [['contacted', 'Označit jako kontaktovanou'], ['closed', 'Uzavřít']], contacted: [['qualified', 'Kvalifikovat'], ['closed', 'Uzavřít']],
@@ -295,6 +318,11 @@ async function leadView(id) {
   if (role === 'admin' && lead.stage !== 'closed') controls.push(form('Přiřadit', [
     field('Odpovídá', 'owner', state.users.filter((u) => u.enabled && u.role === assignment).map((u) => [u.id, u.name])),
   ], (data) => command('assign', { ...base, ...data })));
+  if (role === 'admin' && !lead.handed_at && lead.stage !== 'closed' && state.clientManagement.campaigns.length) {
+    const option = field('Klientská kampaň', 'campaign', campaignOptions(state.clientManagement.campaigns));
+    option.querySelector('select').value = campaign?.id ?? '';
+    controls.push(form('Přiřadit kampaň', [option], (data) => command('attach-campaign', { ...base, ...data })));
+  }
   if (role === assignment && lead.stage !== 'closed' && (!lead.owner_id || (role === 'care' && lead.owner_role === 'agent'))) {
     controls.push(actionButton('Převzít poptávku', () => command('assign', base), 'primary'));
   }
@@ -306,6 +334,7 @@ async function leadView(id) {
   const summary = node('dl', { className: 'detail-grid' }, [
     ['E-mail', lead.email], ['Zdroj', lead.source + ' · ' + lead.campaign], ['Projekt', lead.project],
     ['Stav', stageNames[lead.stage]], ['Odpovídá', lead.owner ?? 'Ve frontě'], ['Předání', formatDate(lead.handed_at)],
+    ...(campaign ? [['Klient', campaign.client], ['Kampaň', campaign.name]] : []),
     ...(lead.investor_id ? [['Účet investora', 'Propojený']] : []),
   ].map(([key, value]) => node('div', {}, node('dt', {}, key), node('dd', {}, value))));
   const notesList = notes.length ? node('ul', { className: 'notes' }, notes.map((item) => node('li', {}, node('strong', {}, item.author),
@@ -342,16 +371,106 @@ function notificationList() {
 }
 
 function users() {
-  const workspaceUsers = state.users.map((user) => [user.name, user.email, roleNames[user.role],
+  const workspaceUsers = state.users.map((user) => [user.name, user.email, roleNames[user.role], user.client,
     pill(user.enabled ? 'Aktivní' : 'Deaktivovaný', user.enabled ? 'positive' : ''),
     user.id === state.user.id ? 'Můj účet' : actionButton(user.enabled ? 'Deaktivovat' : 'Aktivovat', () => {
       if (user.enabled && !window.confirm('Deaktivovat účet ' + user.name + ' a odhlásit jeho relace?')) return;
       return command('user-status', { id: user.id, enabled: !user.enabled });
     })]);
+  const clientChoices = state.clientManagement.clients.map((item) => [item.id, item.name]);
+  const roles = Object.entries(roleNames).filter(([role]) => role !== 'client' || clientChoices.length);
+  const role = field('Role', 'role', roles);
+  const client = conditionalFields(role.querySelector('select'), [field('Klient', 'client', clientChoices)], (value) => value === 'client');
   return [heading('Uživatelé'), node('section', { className: 'card' },
-    table(['Jméno', 'E-mail', 'Role', 'Stav', 'Akce'], workspaceUsers, 'Zatím žádní uživatelé.')),
-  card('Pozvat uživatele', form('Vytvořit pozvánku', [field('E-mail', 'email', 'email'), field('Role', 'role', Object.entries(roleNames))],
+    table(['Jméno', 'E-mail', 'Role', 'Klient', 'Stav', 'Akce'], workspaceUsers, 'Zatím žádní uživatelé.')),
+  card('Pozvat uživatele', form('Vytvořit pozvánku', [field('E-mail', 'email', 'email'), role, client],
     (data) => command('invite', data)))];
+}
+
+const campaignOptions = (items) => items.map((item) => [item.id, item.name + ' · ' + item.code + (item.client ? ' · ' + item.client : '')]);
+
+function campaignManagement() {
+  const { clients, campaigns, recentCosts } = state.clientManagement;
+  const output = [heading('Klienti a kampaně'),
+    card('Kampaně', table(['Klient', 'Kampaň', 'Projekt', 'Kanál', 'ID kampaně'],
+      campaigns.map((item) => [item.client, item.name, item.project, item.source, item.code]), 'Zatím žádné klientské kampaně.'))];
+  if (state.user.role === 'admin') output.push(card('Klienti', [
+    table(['Klient'], clients.map(({ name }) => [name]), 'Zatím žádní klienti.'),
+    form('Přidat klienta', [field('Jméno klienta', 'name', 'text', { maxlength: 120 })], (data) => command('create-client', data)),
+  ]));
+  if (clients.length) output.push(card('Nová kampaň', form('Přidat kampaň', [
+    field('Klient', 'client', clients.map((item) => [item.id, item.name])), field('Název kampaně', 'name'), field('Projekt', 'project'),
+    field('Kanál', 'source'), field('ID kampaně', 'code', 'text', { maxlength: 64 }),
+  ], (data) => command('create-campaign', data))));
+  if (!campaigns.length) return output;
+  const costForm = form('Uložit denní náklad', [
+    field('Kampaň', 'campaign', campaignOptions(campaigns)),
+    field('Datum nákladu', 'day', 'date', { value: reportDate(), max: reportDate() }),
+    field('Náklad v Kč', 'cost', 'text', { inputmode: 'decimal' }),
+  ], (data) => command('save-campaign-cost', data, 'Denní náklad uložen.'));
+  output.push(card('Denní náklady', [
+    costForm,
+    table(['Datum', 'Kampaň', 'Kanál', 'Náklad', 'Akce'], recentCosts.map((row) => [
+      formatDate(row.day), row.campaign + ' · ' + row.code, row.source, czk(row.cost_cents),
+      actionButton('Upravit', () => {
+        costForm.elements.campaign.value = row.campaign_id;
+        costForm.elements.day.value = row.day;
+        costForm.elements.cost.value = (row.cost_cents / 100).toFixed(2).replace('.', ',');
+        costForm.elements.cost.focus();
+      }, 'plain'),
+    ]), 'Zatím žádné evidované náklady.'),
+  ]));
+  return output;
+}
+
+async function clientOverview() {
+  const report = await api('/api/client/report' + clientQuery);
+  const { from, to } = report.period;
+  const query = new URLSearchParams({ from, to });
+  if (report.campaign_id) query.set('campaign', report.campaign_id);
+  const choose = field('Kampaň', 'campaign', campaignOptions(report.options), { required: false });
+  choose.querySelector('option').textContent = 'Všechny kampaně';
+  choose.querySelector('select').value = report.campaign_id ?? '';
+  const update = (options) => run(async () => {
+    const previous = clientQuery;
+    clientQuery = '?' + options.toString();
+    try { await render(true); } catch (error) {
+      clientQuery = previous;
+      throw error;
+    }
+  });
+  const page = (value) => update(new URLSearchParams([...query, ['page', value]]));
+  return [
+    heading('Klientský přehled', pill(report.client)),
+    metrics([
+      ['Předané poptávky', report.totals.handed],
+      ['Evidované náklady', czk(report.totals.cost_cents)],
+      ['Náklad na předání', czk(report.totals.unit_cents)],
+    ], 'client-metrics'),
+    card('Období reportu', form('Použít filtry', [
+      field('Od', 'from', 'date', { value: from }), field('Do', 'to', 'date', { value: to }), choose,
+    ], (data) => update(new URLSearchParams(data)))),
+    card('Výkon kampaní', [
+      table(['Kampaň', 'Kanál', 'Evidovaný náklad', 'Předáno', 'Náklad na předání'], report.campaigns.map((row) => [
+        node('span', {}, node('strong', {}, row.name), node('small', { className: 'line-meta' }, row.code)),
+        row.source, czk(row.cost_cents, 'Bez evidence'), String(row.handed), czk(row.unit_cents),
+      ]), 'V účtu zatím nejsou kampaně.'),
+      node('p', { className: 'muted report-note' }, 'Náklad na předání vychází z výdajů a předání ve zvoleném období.'),
+      report.totals.missing_cost ? node('p', { className: 'muted report-note' }, 'U některé kampaně s předáním chybí evidence nákladů.') : null,
+      actions(csvLink('Stáhnout report CSV', '/api/client/report.csv?' + query, 'kampane.csv')),
+    ]),
+    card('Předané poptávky', [
+      table(['Kontakt', 'Projekt', 'Kampaň', 'Předáno'], report.deliveries.map((row) => [
+        node('span', {}, node('strong', {}, row.name), node('small', { className: 'line-meta' }, row.email)),
+        row.project, row.campaign, formatDate(row.handed_day),
+      ]), 'Ve zvoleném období nebyla předána žádná poptávka.'),
+      report.pages > 1 ? actions(
+        node('span', { className: 'muted' }, 'Strana ' + report.page + ' z ' + report.pages),
+        report.page > 1 ? actionButton('Předchozí', () => page(report.page - 1)) : null,
+        report.page < report.pages ? actionButton('Další', () => page(report.page + 1)) : null,
+      ) : null,
+    ]),
+  ];
 }
 
 function positions(isInvestor) {
@@ -403,7 +522,7 @@ function messages(isInvestor) {
 }
 
 function account() {
-  return [heading('Můj účet'), card(state.user.name, [node('p', {}, state.user.email), node('p', { className: 'muted' }, roleNames[state.user.role] + ' · ' + state.user.workspace)]),
+  return [heading('Můj účet'), card(state.user.name, [node('p', {}, state.user.email), node('p', { className: 'muted' }, roleNames[state.user.role] + ' · ' + (state.client ?? state.user.workspace))]),
     card('Změnit heslo', form('Uložit nové heslo', [
       field('Aktuální heslo', 'current', 'password', { autocomplete: 'current-password', maxlength: 128 }),
       field('Nové heslo', 'next', 'password', { autocomplete: 'new-password', minlength: 12, maxlength: 128 }),
@@ -411,7 +530,7 @@ function account() {
 }
 
 const views = {
-  prehled: overview, poptavky: leadList, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
+  prehled: overview, poptavky: leadList, kampane: campaignManagement, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
   komunikace: () => messages(false), portfolio: () => positions(true), schranka: () => messages(true),
   historie: () => [heading('Historie změn'), card('Aktivita organizace', timeline(state.activity))], ucet: account,
 };
@@ -423,7 +542,7 @@ function navigation(active) {
   document.body.classList.toggle('signed-in', show);
   if (!show) return;
   const { role, workspace, name } = state.user;
-  $('workspace-name').textContent = workspace;
+  $('workspace-name').textContent = state.client ?? workspace;
   $('toolbar-name').textContent = name;
   $('toolbar-role').textContent = roleNames[role];
   const links = available[role].map((route) => {
@@ -434,7 +553,7 @@ function navigation(active) {
   $('navigation').replaceChildren(...links);
 }
 
-async function render() {
+async function render(propagateError = false) {
   const revision = ++renderNumber;
   const hash = location.hash.slice(1);
   const invite = /^pozvanka\/([A-Za-z0-9_-]{43})$/.exec(hash);
@@ -446,18 +565,24 @@ async function render() {
   const lead = /^poptavka\/(\d{1,12})$/.exec(hash);
   const route = lead ? 'poptavky' : hash;
   const active = available[state.user.role].includes(route) ? route : 'prehled';
+  const report = active === 'prehled' && state.user.role === 'client';
   navigation(active);
   try {
-    const content = lead && active === 'poptavky' && state.user.role !== 'marketing' ? await leadView(lead[1]) : views[active]();
+    const content = report ? await clientOverview()
+      : lead && active === 'poptavky' && state.user.role !== 'marketing' ? await leadView(lead[1]) : views[active]();
     if (revision === renderNumber) screen.replaceChildren(...content);
   } catch (e) {
-    if (revision === renderNumber) screen.replaceChildren(heading('Poptávka'), empty(e.message), link('Zpět k poptávkám', '#poptavky'));
+    if (propagateError) throw e;
+    if (revision !== renderNumber) return;
+    if (report) screen.replaceChildren(heading('Klientský přehled'), empty(e.message), actionButton('Obnovit přehled', () => run(refresh)));
+    else screen.replaceChildren(heading('Poptávka'), empty(e.message), link('Zpět k poptávkám', '#poptavky'));
   }
 }
 
 $('logout').addEventListener('click', () => void run(async () => {
   await api('/api/logout', {});
   state = undefined;
+  clientQuery = '';
   document.body.classList.remove('menu-open');
   $('menu-toggle').setAttribute('aria-expanded', 'false');
   history.replaceState(null, '', location.pathname);

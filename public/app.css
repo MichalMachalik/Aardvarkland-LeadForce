@@ -103,6 +103,10 @@ td a { font-weight: 630; text-underline-offset: .15em; }
 .positive { color: var(--green); background: var(--green-soft); }
 .attention { background: #fff1dc; color: #75471c; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,13rem),1fr)); gap: .66rem; margin-block: .55rem .75rem; }
+.field-group { display: contents; }
+.line-meta { display: block; color: var(--muted); font-size: .8rem; }
+.report-note { margin: .6rem 0; font-size: .86rem; }
+.table-scroll + .actions { margin-top: .7rem; }
 form { min-width: 0; }
 label { display: grid; min-width: 0; gap: .27rem; color: var(--muted); font-size: .86rem; font-weight: 590; }
 label:has(textarea) { grid-column: 1/-1; }

@@ -1,10 +1,20 @@
 # Plán plnohodnotného vydání
 
-LeadForce má týmový postup od zdroje poptávky po schránku investora. Cílem finální verze je zvládnout stejný postup s reálnými integracemi, více týmy, dohledatelnými rozhodnutími a obnovou po chybě.
+LeadForce má týmový postup od zdroje poptávky po účet klienta a schránku investora. Klientský účet pokrývá předání, náklady podle kampaní, období a export. Pro provoz s reálnými klienty zbývá návaznost na vlastní systémy, kontrola úplnosti dat a ověření provozních parametrů.
+
+## Nejbližší rozšíření klientského účtu
+
+| Oblast | Rozšíření | Co musí projít při převzetí |
+| --- | --- | --- |
+| Izolace a role | Přístup po projektu, oprávnění k exportu kontaktů a historie přístupů k výkazům. | Stejný den a ID kampaně mohou existovat ve více organizacích. Přímý odkaz, export ani změna role nesmí zpřístupnit cizí záznam. [Microsoft – oddělení dat ve výkazech](https://learn.microsoft.com/power-bi/developer/embedded-row-level-security) |
+| Úplnost nákladů | Import denních výdajů podle účtu poskytovatele a časové zóny. Evidovat zdroj, čas poslední synchronizace, chybu a potvrzenou nulu. | Opakovaný import stejného dne opraví původní částku. Chybějící den se odliší od nuly a je vidět, jaké období je ve výkazu úplné. |
+| Čas a atribuce | Samostatně měřit poptávky podle dne předání a podle skupiny vzniklé v období kampaně. U každé metriky uvést datum a model. | Pozdě předaná poptávka se správně projeví v provozním i atribučním pohledu. Číslo lze srovnat s exportem reklamního systému. [Google Ads – čas konverze](https://support.google.com/google-ads/answer/6270625) · [HubSpot – atribuční reporty](https://knowledge.hubspot.com/reports/create-attribution-reports) |
+| Potvrzení a oprava předání | Klient může potvrdit převzetí, označit nesprávný kontakt a vrátit důvod. Tým má přehled případů bez odpovědi a dohledatelnou historii oprav. | Potvrzení je vidět oběma stranám. Opakované potvrzení nezvýší počet předání. Opravený kontakt zachová historii a odebraný přístup přestane fungovat okamžitě. |
+| Měsíční uzávěrka | Rozlišit průběžný a potvrzený report. Uložit finální verzi s časem, zodpovědnou osobou a rozdíly po pozdější opravě. | CSV a rozhraní dávají totožné výsledky ke stejné verzi. Pozdější oprava vytváří novou verzi a původní report zůstává dohledatelný. |
 
 ## 1. Organizace, přístupy a klientské účty
 
-- Oddělit správu organizace, klientský dohled a podporu provozu. Doplnit přístup po klientovi, projektu a týmu. Pro klientský účet zobrazit předané poptávky, historii a výsledky jeho kampaní.
+- Rozšířit existující přístup po klientovi o projekt, tým a samostatná oprávnění pro dohled a podporu provozu.
 - Zavést SSO přes OIDC, vícefaktorové ověření, bezpečnou obnovu přístupu, správu aktivních relací a změny rolí s dohledatelnou historií. Určit, kdo vydává a ruší pozvánky.
 - Investorům dát přístup k jednotlivé pozici nebo projektu i při více kontaktech za jednoho investora. Ověřit přístup při odebrání člena, změně role a přesunu případu.
 
