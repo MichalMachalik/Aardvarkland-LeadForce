@@ -130,6 +130,8 @@ select { appearance: none; padding-right: 1.65rem; background-image: linear-grad
 .claim-thread { list-style: none; padding: 0; margin: .55rem 0 .85rem; }
 .claim-thread > li { padding: .65rem .75rem; background: var(--muted-surface); border-radius: var(--control); margin-bottom: .4rem; }
 .claim-thread p { margin: .35rem 0 0; }
+.claim-assignments { margin: .7rem 0; }
+.claim-assignments summary { cursor: pointer; font-weight: 600; }
 .attention-link { margin-bottom: .75rem; }
 .attention-count { margin-inline-start: auto; padding: .1rem .42rem; border-radius: 1rem; font-size: .76rem; background: #e4e9ed; color: #20252a; }
 .pill.overdue, .attention-count.overdue, #handoff-escalations-alert { background: #f9e7e5; color: #8a2924; }

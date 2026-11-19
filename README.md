@@ -35,7 +35,7 @@ Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí
 
 1. Jako **Klient** otevřete v tabulce **Předané poptávky** detail kontaktu **Zuzana Šedá**. Použijte **Potvrdit převzetí**.
 2. V detailu vyberte důvod reklamace a případně připište popis. Pro **Jiný důvod** je popis povinný. Podání se objeví v detailu klienta i ve frontě týmu.
-3. Jako **Péče** nebo **Správce** otevřete **Čeká na reakci** a převezměte reklamaci. Tlačítkem **Vyžádat podklady** odešlete klientovi dotaz přímo ve vlákně.
+3. Jako **Péče · Klára Dvořáková** otevřete **Čeká na reakci** a vezměte reklamaci. Tlačítkem **Vyžádat podklady** odešlete klientovi dotaz přímo ve vlákně. Můžete ji také předat uživateli **Martin Jelínek**, přidat důvod a otevřít jeho roli v další kartě. Martin případ najde v **Mých reklamacích** i během čekání na klienta.
 4. Jako **Klient** otevřete **Čeká na reakci**, vyberte případ a použijte **Doplnit podklady**. Na čerstvě otevřeném demu lze tenhle krok vyzkoušet rovnou u kontaktu **Hana Vítová**.
 5. Doplněný případ se vrátí do fronty týmu. Při potřebě dalších podkladů lze postup zopakovat. Po uložení rozhodnutí zůstává výsledek i celé vlákno v detailu. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
 
@@ -46,6 +46,8 @@ Správce může v **Lhůtách reklamací** změnit pracovní dobu, obě lhůty a
 Prošlé otevřené případy se zobrazí v **Eskalacích reklamací** u správce a členů péče s přístupem k danému předání. Fronta uvádí termín i stranu, od které se čeká na reakci. Podle aktuálního termínu se počty v aplikaci obnovují při návratu na kartu a průběžně při jejím otevření. Obsah vlákna se načte znovu tlačítkem **Obnovit detail**. V čerstvém demu najde role **Péče** případ **Hana Vítová** už po lhůtě. Po odpovědi klienta se vrátí mezi běžné případy na reakci týmu s novým termínem.
 
 Potvrzení je jednorázové. U jednoho předání může tým současně řešit jednu reklamaci. Další podání po vyřízení vytvoří nový případ a starší rozhodnutí zůstává v historii. V přehledu péče jsou předání tohoto pracovníka a případy bez aktivního vlastníka. Správce vidí předání v celé organizaci. Vyjádření k reklamaci je součást klientského detailu, interní poznámky CRM zůstávají v týmové evidenci. Původní datum a počet předání pro výpočet kampaní vycházejí ze skutečně evidovaného předání.
+
+Správce může přiřadit otevřenou reklamaci aktivnímu členu péče nebo správci stejné organizace. Řešitel ji může předat s důvodem nebo vrátit do fronty **Bez řešitele**. Při deaktivaci účtu se jeho otevřené reklamace vrátí do fronty automaticky. Při změně řešitele zůstává termín, původní čas převzetí a rozepsaná odpověď na stejný požadavek. Nový řešitel dostane případ i s dosavadním vláknem a interní historií předání. **Moje reklamace** ukazují i případy čekající na klienta. Prošlé případy vidí ve frontě eskalací aktuální řešitel a správce.
 
 ### Pilot importu Google Ads
 

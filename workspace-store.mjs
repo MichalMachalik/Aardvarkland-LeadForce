@@ -244,9 +244,10 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       org, role === 'admin' ? 1 : 0, userId);
     if (role === 'admin' || role === 'care') {
       result.handoffSummary = feedback.summary(actor);
-      const { count, overdue } = feedback.attentionCounts(actor);
+      const { count, overdue, assigned } = feedback.attentionCounts(actor);
       result.handoffAttention = count;
       result.handoffEscalations = overdue;
+      result.handoffAssigned = assigned;
       result.investors = all("SELECT id,name,email FROM users WHERE workspace_id=? AND role='investor' AND enabled=1 ORDER BY name", org);
       result.positions = all('SELECT p.*,u.name AS investor FROM positions p JOIN users u ON u.id=p.investor_id WHERE p.workspace_id=? ORDER BY p.id DESC LIMIT 500', org);
       result.messages = all('SELECT m.*,u.name AS investor FROM messages m JOIN users u ON u.id=m.investor_id WHERE m.workspace_id=? ORDER BY m.id DESC LIMIT 500', org);
@@ -383,6 +384,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       if (!body.enabled) {
         run('DELETE FROM sessions WHERE user_id=?', row.id);
         run("UPDATE leads SET owner_id=NULL,version=version+1 WHERE workspace_id=? AND owner_id=? AND stage<>'closed'", actor.workspace_id, row.id);
+        feedback.releaseMemberClaims(actor, row.id);
       }
       event(actor, body.enabled ? 'user_activated' : 'user_disabled', 'ID ' + row.id);
     },

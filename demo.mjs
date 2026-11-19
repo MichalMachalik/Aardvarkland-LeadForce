@@ -65,10 +65,28 @@ function populateExample(store, token) {
   });
   const profiles = Object.fromEntries([admin, members.marketing, members.agent, members.care, members.investor]
     .map(({ id, role, name }) => [role, { id, role, name }]));
+  profiles.careBackup = prepareClaimColleague(store, token, admin.id);
   profiles.client = populateClientExample(store, token, admin.id, members.care.id);
   prepareExampleBinding(store, profiles);
   prepareExampleFeedback(store, profiles.client.id, members.care);
   return profiles;
+}
+
+export function prepareClaimColleague(store, token, adminId) {
+  const session = store.createSession(adminId);
+  try {
+    const admin = store.session(session);
+    if (!admin) return null;
+    const email = 'martin.demo@leadforce.example';
+    const name = 'Martin Jelínek';
+    const existing = store.state(admin).users.find((user) => user.email === email);
+    if (existing) return existing.role === 'care' && existing.name === name && existing.enabled
+      ? { id: existing.id, role: 'care', name } : null;
+    const invite = store.command(admin, 'invite', { email, role: 'care' });
+    const claimed = store.claimInvite({ token: invite.invite, name, password: token() });
+    try { return { id: store.session(claimed).id, role: 'care', name }; }
+    finally { store.signOut(claimed); }
+  } finally { store.signOut(session); }
 }
 
 function prepareExampleFeedback(store, clientId, care) {

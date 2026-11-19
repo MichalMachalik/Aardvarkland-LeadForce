@@ -1,7 +1,7 @@
 import initSqlJs from 'sql.js';
 import schema from '../schema.sql';
 import { createStore } from '../workspace-store.mjs';
-import { createExample, populateClientExample } from '../demo.mjs';
+import { createExample, populateClientExample, prepareClaimColleague } from '../demo.mjs';
 import { exampleAdsSnapshot, prepareExampleBinding } from '../google-ads-example.mjs';
 import { Failure } from '../validation.mjs';
 import * as credentials from './credentials.mjs';
@@ -20,7 +20,7 @@ const sessionResult = (session) => ({ ...result({ ok: true }), session });
 function handle(store, profiles, { path: url, method, body, session, csrf }) {
   const { pathname: path, searchParams } = new URL(url, 'https://workspace.example');
   if (method === 'GET' && path === '/api/config') {
-    return result({ choices: Object.values(profiles).map(({ role, name }) => ({ role, name })), googleAds: 'demo' });
+    return result({ choices: Object.entries(profiles).map(([key, { role, name }]) => ({ key, role, name })), googleAds: 'demo' });
   }
   if (method === 'POST' && typeof body.email === 'string' && !/\.example$/i.test(body.email.trim())) {
     throw new Failure(422, 'Použijte smyšlenou e-mailovou adresu s doménou .example.');
@@ -97,12 +97,16 @@ async function transact(input) {
           if (profile) profiles.client = profile;
         }
         if (record && !record.adsReady) prepareExampleBinding(store, profiles);
+        if (record && !record.claimColleagueReady && !profiles.careBackup) {
+          const colleague = prepareClaimColleague(store, credentials.token, profiles.admin.id);
+          if (colleague) profiles.careBackup = colleague;
+        }
         try { reply = handle(store, profiles, input); } catch (error) {
           if (!(error instanceof Failure)) throw error;
           reply = result({ error: error.message }, error.status);
         }
-        if (!record || store.upgraded || !record.adsReady || (input.method === 'POST' && reply.status < 400)) {
-          records.put({ profiles, adsReady: true, snapshot: sqlite.export() }, 'current');
+        if (!record || store.upgraded || !record.adsReady || !record.claimColleagueReady || (input.method === 'POST' && reply.status < 400)) {
+          records.put({ profiles, adsReady: true, claimColleagueReady: true, snapshot: sqlite.export() }, 'current');
         }
       } catch (error) {
         reject(error);

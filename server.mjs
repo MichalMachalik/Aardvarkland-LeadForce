@@ -75,7 +75,7 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
       return send(res, 200, await readFile(resolve(base, 'public', file)), { 'Content-Type': mime, 'Content-Security-Policy': policy });
     }
     if (req.method === 'GET' && pathname === '/api/config') {
-      const choices = profiles ? Object.values(profiles).map(({ role, name }) => ({ role, name })) : [];
+      const choices = profiles ? Object.entries(profiles).map(([key, { role, name }]) => ({ key, role, name })) : [];
       return json(res, 200, { choices, ...(googleAds ? { googleAds: googleAds.mode } : {}) });
     }
 

@@ -134,7 +134,7 @@ async function demo({ page }) {
   await admin.getByText('Předání domluveno na dopoledne.', { exact: true }).waitFor();
 
   const care = await page();
-  await btn(care, /^Péče ·/).click();
+  await btn(care, 'Péče · Klára Dvořáková').click();
   await titled(care, 'Přehled týmu');
   await goto(care, 'Poptávky');
   await care.getByRole('link', { name: 'Karolína Procházková' }).click();
@@ -369,6 +369,7 @@ async function handoffFeedback({ page }) {
   const name = 'Zuzana Šedá';
   const subject = 'Ověřením jsme našli jiné telefonní číslo.';
   const request = 'Doplňte prosím referenci původního záznamu.';
+  const transferNote = 'Martin zastupuje Kláru během dovolené.';
   const reply = 'Pro ukázku doplňuji referenci TEST-1234.';
   const outcome = 'Reklamaci uznáváme. Teď ověříme správný kontakt.';
   const badge = (tab) => tab.locator('#handoff-attention-count');
@@ -398,7 +399,7 @@ async function handoffFeedback({ page }) {
   assert.equal(await btn(client, 'Podat reklamaci').count(), 0);
 
   const staff = await page();
-  await btn(staff, /^Péče ·/).click();
+  await btn(staff, 'Péče · Klára Dvořáková').click();
   await titled(staff, 'Přehled týmu');
   await staff.locator('#handoff-escalations-alert').click();
   await titled(staff, 'Eskalace reklamací');
@@ -422,7 +423,10 @@ async function handoffFeedback({ page }) {
   await titled(staff, name);
   await staff.getByText('Neplatné kontaktní údaje', { exact: true }).waitFor();
   await staff.getByText(subject, { exact: true }).waitFor();
-  await btn(staff, 'Převzít reklamaci').click();
+  await staff.getByLabel('Nový řešitel').selectOption({ label: 'Klára Dvořáková · já' });
+  await btn(staff, 'Přiřadit reklamaci').click();
+  await staff.getByText('Reklamace byla přiřazena.', { exact: true }).waitFor();
+  await btn(staff, 'Zahájit řešení').click();
   await staff.getByText('Reklamace je v řešení.', { exact: true }).waitFor();
   await btn(client, 'Obnovit detail').click();
   await client.getByText('V řešení', { exact: true }).waitFor();
@@ -442,25 +446,45 @@ async function handoffFeedback({ page }) {
   await titled(client, name);
   await client.getByText(request, { exact: true }).waitFor();
   await client.getByText('Váš termín', { exact: true }).waitFor();
+  const deadline = await client.locator('.claim-deadline time').getAttribute('datetime');
   await client.getByLabel('Doplnění podkladů', { exact: true }).fill(reply);
-  await staff.getByLabel('Vyjádření pro klienta', { exact: true }).fill(outcome);
+
+  const colleague = await page();
+  await btn(colleague, 'Péče · Martin Jelínek').click();
+  await titled(colleague, 'Přehled týmu');
+  await colleague.locator('#handoff-assigned-count').waitFor({ state: 'hidden' });
+  await staff.getByLabel('Nový řešitel').selectOption({ label: 'Martin Jelínek' });
+  await staff.getByLabel('Důvod předání').fill(transferNote);
+  await btn(staff, 'Předat reklamaci').click();
+  await staff.getByText('Reklamace byla předána.', { exact: true }).waitFor();
+  await titled(staff, 'Předání klientům');
+  await focus(colleague);
+  await colleague.locator('#handoff-assigned-alert').click();
+  await titled(colleague, 'Moje reklamace');
+  await colleague.getByRole('link', { name, exact: true }).click();
+  await titled(colleague, name);
+  await colleague.getByText('Termín klienta', { exact: true }).waitFor();
+  assert.equal(await colleague.locator('.claim-deadline time').getAttribute('datetime'), deadline);
+  await colleague.getByText('Historie přiřazení', { exact: true }).click();
+  await colleague.getByText(transferNote, { exact: true }).waitFor();
+  assert.equal(await client.getByText('Historie přiřazení').count(), 0);
+  assert.equal(await client.getByLabel('Doplnění podkladů', { exact: true }).inputValue(), reply);
+  await colleague.getByLabel('Vyjádření pro klienta', { exact: true }).fill(outcome);
+
   await btn(client, 'Doplnit podklady').click();
   await client.getByText('Podklady byly doplněny.', { exact: true }).waitFor();
   assert.equal(await badge(client).textContent(), '1');
   assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  await focus(staff);
-  await staff.waitForFunction(() => document.querySelector('#handoff-attention-count')?.textContent === '1');
-  assert.equal(await staff.getByLabel('Vyjádření pro klienta', { exact: true }).inputValue(), outcome);
-  await staff.getByRole('navigation').locator('a[href="#reakce"]').click();
-  await titled(staff, 'Čeká na reakci týmu');
-  await staff.getByRole('link', { name, exact: true }).click();
-  await titled(staff, name);
-  await staff.getByText(reply, { exact: true }).waitFor();
-  await staff.getByText('Termín týmu', { exact: true }).waitFor();
-  await staff.getByLabel('Výsledek reklamace', { exact: true }).selectOption('accepted');
-  await staff.getByLabel('Vyjádření pro klienta', { exact: true }).fill(outcome);
-  await btn(staff, 'Uložit rozhodnutí').click();
-  await staff.getByText('Rozhodnutí bylo uloženo.', { exact: true }).waitFor();
+  await focus(colleague);
+  await colleague.waitForFunction(() => document.querySelector('#handoff-attention-count')?.textContent === '1');
+  assert.equal(await colleague.getByLabel('Vyjádření pro klienta', { exact: true }).inputValue(), outcome);
+  await btn(colleague, 'Obnovit detail').click();
+  await colleague.getByText(reply, { exact: true }).waitFor();
+  await colleague.getByText('Termín týmu', { exact: true }).waitFor();
+  await colleague.getByLabel('Výsledek reklamace', { exact: true }).selectOption('accepted');
+  await colleague.getByLabel('Vyjádření pro klienta', { exact: true }).fill(outcome);
+  await btn(colleague, 'Uložit rozhodnutí').click();
+  await colleague.getByText('Rozhodnutí bylo uloženo.', { exact: true }).waitFor();
 
   await btn(client, 'Obnovit detail').click();
   await client.getByText('Uznaná', { exact: true }).waitFor();
@@ -472,12 +496,12 @@ async function handoffFeedback({ page }) {
   assert.equal(await client.getByRole('link', { name, exact: true }).count(), 0);
   assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 
-  await staff.getByRole('link', { name: 'Zpět k upozorněním', exact: true }).click();
-  await titled(staff, 'Čeká na reakci týmu');
-  await staff.getByText('Žádná reklamace teď nečeká na vaši reakci.', { exact: true }).waitFor();
-  await goto(staff, 'Předání klientům');
+  await colleague.getByRole('link', { name: 'Zpět k mým reklamacím', exact: true }).click();
+  await titled(colleague, 'Moje reklamace');
+  await colleague.getByText('Nemáte přiřazenou žádnou otevřenou reklamaci.', { exact: true }).waitFor();
+  await btn(staff, 'Obnovit seznam').click();
   await titled(staff, 'Předání klientům');
-  assert.equal(await row.count(), 0);
+  await row.waitFor({ state: 'hidden' });
   await staff.getByLabel('Stav předání', { exact: true }).selectOption('closed');
   await btn(staff, 'Použít filtr').click();
   await row.getByText('Uznaná', { exact: true }).waitFor();
@@ -551,5 +575,5 @@ const check = process.env.TEST_URL
   ? exerciseBrowser(process.env.TEST_URL, [], process.env.FEEDBACK_ONLY ? claimWorkflows : published, true)
   : openCase(true, demoWorkflows).then(() => openCase(false, blank));
 check.then(() => {
-  console.log('PASS browser claim thread, escalation and working calendar settings');
+  console.log('PASS browser claim assignment and transfer, evidence, deadline, escalation and resolution');
 }).catch((error) => { console.error(error); process.exitCode = 1; });

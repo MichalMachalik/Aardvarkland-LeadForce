@@ -23,18 +23,20 @@ const events = {
   handoff_claim_review: 'Převzetí reklamace', handoff_claim_accepted: 'Uznaná reklamace', handoff_claim_rejected: 'Zamítnutá reklamace',
   handoff_claim_evidence_requested: 'Vyžádání podkladů', handoff_claim_evidence_supplied: 'Doplnění podkladů klientem',
   handoff_calendar_saved: 'Změna pracovního kalendáře reklamací',
+  handoff_claim_assigned: 'Přiřazení řešitele reklamace', handoff_claim_released: 'Vrácení reklamace do fronty',
 };
 const available = {
-  admin: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'lhuty', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
+  admin: ['prehled', 'poptavky', 'predani', 'prirazene', 'reakce', 'eskalace', 'lhuty', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
   marketing: ['prehled', 'poptavky', 'kampane', 'ucet'],
   agent: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'ucet'],
-  care: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
+  care: ['prehled', 'poptavky', 'predani', 'prirazene', 'reakce', 'eskalace', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
   investor: ['prehled', 'portfolio', 'schranka', 'ucet'],
   client: ['prehled', 'reakce', 'ucet'],
 };
 const titles = {
   prehled: ['Přehled', 'grid'], poptavky: ['Poptávky', 'list'], ukoly: ['Úkoly', 'check'],
   predani: ['Předání klientům', 'check'],
+  prirazene: ['Moje reklamace', 'user'],
   reakce: ['Čeká na reakci', 'mail'],
   eskalace: ['Eskalace reklamací', 'clock'],
   lhuty: ['Lhůty reklamací', 'clock'],
@@ -57,7 +59,7 @@ let renderNumber = 0;
 let busy = false;
 let clientQuery = '';
 let handoffParams = new URLSearchParams();
-let attentionPages = { reakce: 1, eskalace: 1 };
+let attentionPages = { reakce: 1, eskalace: 1, prirazene: 1 };
 let checkingAttention = false;
 let adsFormValues = {};
 
@@ -213,9 +215,9 @@ function loginScreen(invitation) {
     node('img', { className: 'mark', src: './assets/aardvarkland.png', width: 34, height: 34, alt: '' }), 'Aardvarkland LeadForce');
   const login = node('div', { className: 'login' }, brand, heading(invitation ? 'Přijmout pozvánku' : 'Přihlášení do pracovního prostoru'));
   if (!invitation && config.choices.length) {
-    login.append(card('Vyberte roli', node('div', { className: 'profile-list' }, config.choices.map(({ role, name }) =>
+    login.append(card('Vyberte roli', node('div', { className: 'profile-list' }, config.choices.map(({ key, role, name }) =>
       actionButton(roleNames[role] + ' · ' + name, () => run(async () => {
-        await api('/api/example/session', { role });
+        await api('/api/example/session', { role: key ?? role });
         history.replaceState(null, '', '#prehled');
         await refresh();
       }))))));
@@ -279,7 +281,9 @@ function overview() {
   if (unread) output.push(actions(link('Nepřečtená upozornění (' + unread + ')', '#upozorneni', { className: 'button secondary' })));
   if (state.handoffSummary?.active) output.push(actions(link('Otevřené reklamace (' + state.handoffSummary.active + ')', '#predani',
     { className: 'button secondary' })));
-  if (typeof state.handoffAttention === 'number') output.push(actions(attentionLink('eskalace'), attentionLink('reakce')));
+  if (typeof state.handoffAttention === 'number') {
+    output.push(actions(attentionLink('eskalace'), attentionLink('reakce'), attentionLink('prirazene')));
+  }
   if (state.tasks) {
     const upcoming = state.tasks.filter((task) => !task.done_at).slice(0, 5);
     output.push(card('Otevřené úkoly', table(['Úkol', 'Termín', 'Odpovídá'], upcoming
@@ -573,11 +577,12 @@ const claimStatus = (status, turn) => {
   return status ? pill(claimStates[status], status === 'accepted' ? 'positive' : '') : '—';
 };
 
-const responseTitle = (route) => route === 'eskalace' ? titles.eskalace[0]
+const responseTitle = (route) => route !== 'reakce' ? titles[route][0]
   : state.user.role === 'client' ? 'Čeká na vaši odpověď' : 'Čeká na reakci týmu';
 const responseCounters = {
   reakce: { stateKey: 'handoffAttention', badge: 'handoff-attention-count', alert: 'handoff-alert' },
   eskalace: { stateKey: 'handoffEscalations', badge: 'handoff-escalations-count', alert: 'handoff-escalations-alert' },
+  prirazene: { stateKey: 'handoffAssigned', badge: 'handoff-assigned-count', alert: 'handoff-assigned-alert' },
 };
 const responseLabel = (route, count) => responseTitle(route) + ' (' + count + ')';
 
@@ -618,10 +623,11 @@ async function refreshAttention() {
   if (document.hidden || busy || checkingAttention || typeof current?.handoffAttention !== 'number') return;
   checkingAttention = true;
   try {
-    const { count, overdue, checkedAt, calendarRevision } = await api('/api/handoff-attention/count');
+    const { count, overdue, assigned, checkedAt, calendarRevision } = await api('/api/handoff-attention/count');
     if (state !== current) return;
     updateCounter('reakce', count);
     updateCounter('eskalace', overdue);
+    updateCounter('prirazene', assigned);
     const message = $('claim-calendar-notice');
     if (message && Number(message.dataset.calendarRevision) !== calendarRevision) {
       message.hidden = false;
@@ -634,17 +640,21 @@ async function refreshAttention() {
 }
 
 async function handoffAttention(route) {
-  const escalations = route === 'eskalace';
-  const inbox = await api('/api/handoff-attention?page=' + attentionPages[route] + (escalations ? '&overdue=1' : ''));
+  const filter = { eskalace: '&overdue=1', prirazene: '&assigned=1' };
+  const emptyMessage = { eskalace: 'Žádná otevřená reklamace není po lhůtě.',
+    prirazene: 'Nemáte přiřazenou žádnou otevřenou reklamaci.', reakce: 'Žádná reklamace teď nečeká na vaši reakci.' };
+  const inbox = await api('/api/handoff-attention?page=' + attentionPages[route] + (filter[route] ?? ''));
   const client = state.user.role === 'client';
+  const showAssignee = !client && route !== 'prirazene';
   return [
     heading(responseTitle(route), actionButton('Obnovit seznam', () => run(refresh))),
     calendarNotice(inbox.rows[0]?.calendar_revision),
     node('section', { className: 'card' }, [
-      table(['Poptávka', 'Kampaň', 'Reklamace', 'Na tahu', 'Termín reakce'], inbox.rows.map((row) => [
+      table(['Poptávka', 'Kampaň', 'Reklamace', 'Na tahu', ...(showAssignee ? ['Řešitel'] : []), 'Termín reakce'], inbox.rows.map((row) => [
         link(row.name, '#predani/' + row.id + '/' + route), row.campaign, claimStatus(row.claim_status, row.claim_turn),
-        row.claim_turn === 'request' ? (client ? 'Vy' : 'Klient') : 'Tým', deadline(row.sla_due_at, row.sla_overdue),
-      ]), escalations ? 'Žádná otevřená reklamace není po lhůtě.' : 'Žádná reklamace teď nečeká na vaši reakci.'),
+        row.claim_turn === 'request' ? (client ? 'Vy' : 'Klient') : 'Tým',
+        ...(showAssignee ? [row.assignee || 'Bez řešitele'] : []), deadline(row.sla_due_at, row.sla_overdue),
+      ]), emptyMessage[route]),
       pagination(inbox.page, inbox.pages, (page) => run(async () => {
         const previous = attentionPages[route];
         attentionPages[route] = page;
@@ -661,6 +671,8 @@ async function handoffInbox() {
     closed: 'Vyřízené reklamace', client_turn: 'Čeká na podklady klienta', all: 'Všechna předání' };
   const status = field('Stav předání', 'status', Object.entries(options));
   status.querySelector('select').value = inbox.status;
+  const assignee = field('Přiřazení reklamace', 'assignee', [['all', 'Všechna'], ['unassigned', 'Bez řešitele']]);
+  assignee.querySelector('select').value = handoffParams.get('assignee') || 'all';
   const update = (params) => run(async () => {
     const previous = handoffParams;
     handoffParams = new URLSearchParams(params);
@@ -674,12 +686,13 @@ async function handoffInbox() {
     calendarNotice(inbox.rows[0]?.calendar_revision),
     metrics([['Předané poptávky', summary.total], ['Potvrzená převzetí', summary.confirmed], ['Otevřené reklamace', summary.active]]),
     card('Přehled předání', [
-      form('Použít filtr', [status], ({ status }) => update({ status })),
-      table(['Poptávka', 'Klient', 'Předáno', 'Převzetí', 'Reklamace', 'Termín reakce'], inbox.rows.map((row) => [
+      form('Použít filtr', [status, assignee], (data) => update(data)),
+      table(['Poptávka', 'Klient', 'Předáno', 'Převzetí', 'Reklamace', 'Řešitel', 'Termín reakce'], inbox.rows.map((row) => [
         node('span', {}, link(row.name, '#predani/' + row.id), node('small', { className: 'line-meta' }, row.campaign)),
-        row.client, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status, row.claim_turn), deadline(row.sla_due_at, row.sla_overdue),
+        row.client, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status, row.claim_turn),
+        row.assignee || (row.sla_due_at ? 'Bez řešitele' : '—'), deadline(row.sla_due_at, row.sla_overdue),
       ]), 'V tomto přehledu zatím nejsou žádné předané poptávky.'),
-      pagination(inbox.page, inbox.pages, (page) => update({ status: inbox.status, page })),
+      pagination(inbox.page, inbox.pages, (page) => update({ ...Object.fromEntries(handoffParams), status: inbox.status, page })),
     ]),
   ];
 }
@@ -695,11 +708,42 @@ function newClaimForm(deliveryId) {
   }, 'Reklamace byla podána.'));
 }
 
-function claimCard(claim, team, delivery) {
-  const take = claim.status === 'open' || (claim.status === 'review' && claim.reviewer_id !== state.user.id);
-  const canResolve = claim.status === 'review' && (state.user.role === 'admin' || claim.reviewer_id === state.user.id);
+function assignmentForm(claim, delivery, { candidates }, route) {
+  const assigned = Boolean(delivery.assignee_id);
+  const options = candidates.filter(({ id }) => id !== delivery.assignee_id)
+    .map(({ id, name }) => [id, name + (id === state.user.id ? ' · já' : '')]);
+  if (assigned) options.push(['queue', 'Vrátit do fronty']);
+  const key = crypto.randomUUID();
+  return form(assigned ? 'Předat reklamaci' : 'Přiřadit reklamaci', [
+    field('Nový řešitel', 'assignee', options),
+    field(assigned ? 'Důvod předání' : 'Poznámka k přiřazení', 'note', 'textarea', { required: assigned, maxlength: 500 }),
+  ], ({ assignee, note }) => run(async () => {
+    const target = assignee === 'queue' ? null : Number(assignee);
+    await api('/api/actions/assign-handoff-claim', { id: claim.id, version: claim.version, assignee: target, note, request_key: key });
+    if (state.user.role === 'care' && target !== state.user.id) history.replaceState(null, '', '#' + route);
+    await refresh();
+    notice(target === null ? 'Reklamace se vrátila do fronty.' : assigned ? 'Reklamace byla předána.' : 'Reklamace byla přiřazena.');
+  }));
+}
+
+function assignmentTimeline(entries) {
+  if (!entries?.length) return null;
+  return node('details', { className: 'claim-assignments' }, node('summary', {}, 'Historie přiřazení'),
+    node('ol', { className: 'claim-thread' }, entries.map((entry) => node('li', {},
+      node('div', { className: 'actions' },
+        node('strong', {}, (entry.previous_name || 'Fronta') + ' → ' + (entry.assigned_name || 'Fronta')),
+        node('span', { className: 'muted' }, entry.actor + ' · ' + formatDate(entry.created_at))),
+      entry.note ? node('p', { className: 'prose' }, entry.note) : null))));
+}
+
+function claimCard(claim, team, delivery, assignment, route) {
+  const owner = delivery?.assignee_id;
+  const canWork = team && (state.user.role === 'admin' || owner === state.user.id);
+  const take = team && (claim.status === 'open' && canWork || assignment?.canAssign && !owner);
+  const canResolve = canWork && claim.status === 'review';
   const args = { id: claim.id, version: claim.version };
-  const turn = claim.messages.at(-1)?.kind;
+  const latest = claim.messages.at(-1);
+  const turn = latest?.kind;
   const request = team && canResolve && turn !== 'request';
   const reply = !team && claim.status === 'review' && turn === 'request';
   const thread = claim.messages.length ? [
@@ -712,8 +756,9 @@ function claimCard(claim, team, delivery) {
   ] : null;
   const evidenceForm = (label, fieldLabel, action, message) => {
     const requestKey = crypto.randomUUID();
+    const target = action === 'reply-claim-evidence' ? { request_id: latest.id } : {};
     return form(label, [field(fieldLabel, 'message', 'textarea', { maxlength: 1600 })],
-      (data) => command(action, { ...args, ...data, request_key: requestKey }, message));
+      (data) => command(action, { ...args, ...data, ...target, request_key: requestKey }, message));
   };
   return card('Reklamace #' + claim.id, [
     actions(claimStatus(claim.status, turn), node('span', { className: 'muted' }, formatDate(claim.filed_at) + ' · ' + claim.reporter)),
@@ -722,14 +767,17 @@ function claimCard(claim, team, delivery) {
     node('dd', {}, deadline(delivery.sla_due_at, delivery.sla_overdue))) : null,
     node('p', { className: 'claim-reason' }, claimReasons[claim.reason]),
     claim.description ? node('p', { className: 'prose' }, claim.description) : null,
-    team && claim.reviewer ? node('p', { className: 'muted' }, 'Řeší ' + claim.reviewer + ' · ' + formatDate(claim.reviewed_at)) : null,
+    team && delivery && (delivery.assignee || delivery.sla_due_at) ? node('dl', { className: 'claim-term' },
+      node('dt', {}, 'Řešitel'), node('dd', {}, delivery.assignee || 'Bez řešitele')) : null,
+    take ? actions(actionButton(owner ? 'Zahájit řešení' : 'Převzít reklamaci',
+      () => command('review-handoff-claim', args, 'Reklamace je v řešení.'))) : null,
+    assignment?.canAssign ? assignmentForm(claim, delivery, assignment, route) : null,
+    assignmentTimeline(claim.assignments),
     thread,
     claim.resolution ? [
       node('h3', {}, 'Vyjádření týmu'), node('p', { className: 'prose' }, claim.resolution),
       node('p', { className: 'muted' }, formatDate(claim.resolved_at) + (team && claim.resolver ? ' · ' + claim.resolver : '')),
     ] : null,
-    team && take ? actions(actionButton(claim.status === 'open' ? 'Převzít reklamaci' : 'Převzít řešení',
-      () => command('review-handoff-claim', args, 'Reklamace je v řešení.'))) : null,
     request ? evidenceForm('Vyžádat podklady', 'Požadované podklady', 'request-claim-evidence', 'Požadavek je ve vlákně reklamace.') : null,
     reply ? evidenceForm('Doplnit podklady', 'Doplnění podkladů', 'reply-claim-evidence', 'Podklady byly doplněny.') : null,
     team && canResolve ? form('Uložit rozhodnutí', [
@@ -740,9 +788,10 @@ function claimCard(claim, team, delivery) {
 }
 
 async function handoffView(id, route) {
-  const { delivery, claims } = await api('/api/handoffs/' + id);
+  const { delivery, claims, assignment } = await api('/api/handoffs/' + id);
   const team = state.user.role !== 'client';
-  const backLabel = { reakce: 'Zpět k upozorněním', eskalace: 'Zpět k eskalacím', predani: 'Zpět k předáním', prehled: 'Zpět do přehledu' };
+  const backLabel = { reakce: 'Zpět k upozorněním', eskalace: 'Zpět k eskalacím', prirazene: 'Zpět k mým reklamacím',
+    predani: 'Zpět k předáním', prehled: 'Zpět do přehledu' };
   const summary = node('dl', { className: 'detail-grid' }, [
     ['Kontakt', delivery.email], ['Projekt', delivery.project], ['Kampaň', delivery.campaign + ' · ' + delivery.code],
     ['Předáno', formatDate(delivery.handed_at)], ['Klient', delivery.client], ['Převzetí', receiptStatus(delivery)],
@@ -758,7 +807,8 @@ async function handoffView(id, route) {
       !team && !delivery.confirmed_at ? actions(actionButton('Potvrdit převzetí',
         () => command('confirm-handoff', { id }, 'Převzetí bylo potvrzeno.'), 'primary')) : null,
     ], 'handoff-detail'),
-    claims.length ? claims.map((claim, index) => claimCard(claim, team, index === 0 ? delivery : null))
+    claims.length ? claims.map((claim, index) => claimCard(claim, team, index === 0 ? delivery : null,
+      index === 0 ? assignment : null, route))
       : team ? card('Reklamace', empty('K tomuto předání není podaná reklamace.')) : null,
     !team && !claims.some((claim) => ['open', 'review'].includes(claim.status))
       ? card('Podání reklamace', newClaimForm(id)) : null,
@@ -844,7 +894,8 @@ function claimCalendarSettings() {
 const views = {
   prehled: overview, poptavky: leadList, kampane: campaignManagement, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
   predani: handoffInbox,
-  reakce: () => handoffAttention('reakce'), eskalace: () => handoffAttention('eskalace'), lhuty: claimCalendarSettings,
+  reakce: () => handoffAttention('reakce'), eskalace: () => handoffAttention('eskalace'), prirazene: () => handoffAttention('prirazene'),
+  lhuty: claimCalendarSettings,
   komunikace: () => messages(false), portfolio: () => positions(true), schranka: () => messages(true),
   historie: () => [heading('Historie změn'), card('Aktivita organizace', timeline(state.activity))], ucet: account,
 };
@@ -882,7 +933,7 @@ async function render(propagateError = false) {
     return;
   }
   const lead = /^poptavka\/(\d{1,12})$/.exec(hash);
-  const handoff = /^predani\/(\d{1,12})(?:\/(reakce|eskalace))?$/.exec(hash);
+  const handoff = /^predani\/(\d{1,12})(?:\/(reakce|eskalace|prirazene))?$/.exec(hash);
   const role = state.user.role;
   const maySeeHandoff = ['admin', 'care', 'client'].includes(role);
   const route = handoff && maySeeHandoff ? (handoff[2] || (role === 'client' ? 'prehled' : 'predani')) : lead ? 'poptavky' : hash;
@@ -910,7 +961,7 @@ $('logout').addEventListener('click', () => void run(async () => {
   state = undefined;
   clientQuery = '';
   handoffParams = new URLSearchParams();
-  attentionPages = { reakce: 1, eskalace: 1 };
+  attentionPages = { reakce: 1, eskalace: 1, prirazene: 1 };
   adsFormValues = {};
   document.body.classList.remove('menu-open');
   $('menu-toggle').setAttribute('aria-expanded', 'false');

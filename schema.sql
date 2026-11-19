@@ -152,6 +152,18 @@ CREATE TABLE IF NOT EXISTS handoff_claim_messages (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS handoff_claim_messages_thread ON handoff_claim_messages(workspace_id,claim_id,id DESC);
 
+CREATE TABLE IF NOT EXISTS handoff_claim_assignments (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, claim_id INTEGER NOT NULL,
+  actor_id INTEGER NOT NULL, previous_user INTEGER, assigned_user INTEGER, created_at TEXT NOT NULL,
+  note TEXT NOT NULL, request_key TEXT,
+  UNIQUE (workspace_id,claim_id,request_key),
+  FOREIGN KEY (workspace_id,claim_id) REFERENCES handoff_claims(workspace_id,id),
+  FOREIGN KEY (workspace_id,actor_id) REFERENCES users(workspace_id,id),
+  FOREIGN KEY (workspace_id,previous_user) REFERENCES users(workspace_id,id),
+  FOREIGN KEY (workspace_id,assigned_user) REFERENCES users(workspace_id,id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS handoff_claim_assignment_history ON handoff_claim_assignments(workspace_id,claim_id,id DESC);
+
 CREATE TABLE IF NOT EXISTS handoff_calendars (
   workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id),
   policy TEXT NOT NULL,
