@@ -1,0 +1,58 @@
+export function populateExample(store, token) {
+  const setup = store.bootstrap({
+    slug: 'javorova', workspace: 'Javorová projekty', name: 'Adéla Novotná',
+    email: 'sprava@javorova.example', password: token(),
+  });
+  const admin = store.session(store.createSession(setup.user));
+  const members = {};
+  for (const [key, name, role] of [
+    ['marketing', 'Nina Vacková', 'marketing'], ['agent', 'Tomáš Bláha', 'agent'],
+    ['care', 'Klára Dvořáková', 'care'], ['investor', 'Eliška Hájková', 'investor'],
+    ['otherInvestor', 'Radek Konečný', 'investor'],
+  ]) {
+    const invite = store.command(admin, 'invite', { email: key.toLowerCase() + '@javorova.example', role });
+    members[key] = store.session(store.claimInvite({ token: invite.invite, name, password: token() }));
+  }
+  for (const [name, project, source, campaign] of [
+    ['Eliška Hájková', 'Dům Pod Lípou', 'Google Ads', 'G-301'],
+    ['Tereza Louková', 'Park Habr', 'Meta', 'M-118'],
+    ['Anna Kopecká', 'Dům Pod Lípou', 'Google Ads', 'G-301'],
+    ['Viktor Malý', 'Ateliéry U Nádraží', 'LinkedIn', 'L-041'],
+    ['Lucie Švecová', 'Park Habr', 'Sklik', 'S-127'],
+  ]) store.command(members.marketing, 'create-lead', {
+    name, email: name === members.investor.name ? members.investor.email
+      : name.split(' ')[0].normalize('NFD').replace(/\p{M}/gu, '').toLowerCase() + '@kontakty.example',
+    project, source, campaign,
+  });
+  store.command(members.agent, 'assign', { id: 1, version: 1 });
+  store.command(members.agent, 'change-stage', { id: 1, version: 2, stage: 'contacted' });
+  store.command(members.agent, 'change-stage', { id: 1, version: 3, stage: 'qualified' });
+  store.command(members.agent, 'add-note', { id: 1, body: 'Zájemce potvrdil zájem o další informace k projektu.' });
+  store.command(members.care, 'assign', { id: 1, version: 4 });
+  store.command(members.care, 'change-stage', { id: 1, version: 5, stage: 'handed' });
+  store.command(members.care, 'link-investor', { id: 1, version: 6 });
+  store.command(members.care, 'add-task', { id: 1, title: 'Připravit přehled dalšího postupu', due: '2026-12-18' });
+  store.command(admin, 'assign', { id: 2, version: 1, owner: members.agent.id });
+  store.command(members.agent, 'change-stage', { id: 2, version: 2, stage: 'contacted' });
+  store.command(members.agent, 'assign', { id: 3, version: 1 });
+  store.command(members.agent, 'change-stage', { id: 3, version: 2, stage: 'contacted' });
+  store.command(members.agent, 'change-stage', { id: 3, version: 3, stage: 'qualified' });
+  const investors = [
+    [members.investor.id, 'Dům Pod Lípou', '200000', '2028-04-30'],
+    [members.investor.id, 'Park Habr', '125000', '2027-09-30'],
+    [members.otherInvestor.id, 'Ateliéry U Nádraží', '350000', '2029-06-30'],
+  ];
+  for (const [investor, project, principal, maturity] of investors) {
+    store.command(members.care, 'add-position', { investor, project, principal, maturity });
+  }
+  const message = store.command(members.care, 'draft-message', {
+    investor: members.investor.id, title: 'Podzimní přehled projektu', body: 'Příprava první etapy je hotová. Další aktualizace bude po dokončení projektové dokumentace.',
+  });
+  store.command(members.care, 'publish-message', { id: message.id });
+  store.command(members.care, 'draft-message', {
+    investor: members.investor.id, title: 'Harmonogram příští etapy', body: 'Zpráva je připravená ke kontrole před zveřejněním.',
+  });
+  const profiles = Object.fromEntries([admin, members.marketing, members.agent, members.care, members.investor]
+    .map(({ id, role, name }) => [role, { id, role, name }]));
+  return profiles;
+}

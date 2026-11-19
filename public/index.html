@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Pracovní prostor pro kampaně, poptávky a péči o investory.">
+  <title>Aardvarkland LeadForce</title>
+  <link rel="icon" href="./assets/aardvarkland.png" type="image/png">
+  <link rel="stylesheet" href="./app.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Přejít na obsah</a>
+  <aside id="sidebar" hidden>
+    <a class="brand" href="#prehled">
+      <img class="mark" src="./assets/aardvarkland.png" width="34" height="34" alt="">
+      <span>Aardvarkland LeadForce <small id="workspace-name"></small></span>
+    </a>
+    <nav id="navigation" aria-label="Hlavní nabídka"></nav>
+  </aside>
+  <div class="workspace" id="workspace">
+    <header id="toolbar" hidden>
+      <button type="button" id="menu-toggle" class="icon-button" aria-label="Navigace" aria-controls="sidebar" aria-expanded="false"><span class="line-icon menu" aria-hidden="true"></span></button>
+      <img class="mark mobile-mark" src="./assets/aardvarkland.png" width="26" height="26" alt="">
+      <span class="toolbar-title" id="toolbar-name"></span>
+      <span class="toolbar-role" id="toolbar-role"></span>
+      <button type="button" id="logout" class="button secondary">Odhlásit</button>
+    </header>
+    <main id="main" tabindex="-1">
+      <p id="notice" role="status" hidden></p>
+      <div id="screen"></div>
+    </main>
+  </div>
+</body>
+</html>
