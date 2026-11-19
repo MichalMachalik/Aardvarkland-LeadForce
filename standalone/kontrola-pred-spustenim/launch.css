@@ -1,5 +1,5 @@
-.input-card { padding: .94rem 1.03rem; margin-bottom: .82rem; }
-#check { display: grid; align-items: start; gap: .9rem 1.15rem; }
+.input-card { padding: .85rem .94rem; margin-bottom: .74rem; }
+#check { display: grid; align-items: start; gap: .78rem .96rem; }
 #check > .page-head { grid-column: 1 / -1; margin-bottom: .2rem; }
 #check-form { margin-bottom: 0; }
 .button.result-jump { display: none; }
@@ -14,10 +14,10 @@
 .input-actions p, .result-head p, .log-head p, #conversion-context { font-size: .88rem; }
 .product-status { display: inline-flex; border-radius: 1rem; padding: .17rem .55rem; font-size: .8rem; font-weight: 650; white-space: nowrap; background: #e7f5ee; color: #195438; }
 .product-status.issue { background: #fff2df; color: #79490c; }
-.result-list { display: grid; gap: .65rem; }
-.result-card { border-radius: var(--card-radius); border: 1px solid var(--line); padding: .77rem .9rem; background: #fff; }
-.result-top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .5rem; }
-.result-top h3 { font-size: .97rem; margin: 0; overflow-wrap: anywhere; }
+.result-list { display: grid; gap: .6rem; }
+.result-card { min-width: 0; border-radius: var(--card-radius); border: 1px solid var(--line); padding: .69rem .82rem; background: #fff; }
+.result-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .45rem; }
+.result-top h3 { font-size: .91rem; margin: 0; overflow-wrap: anywhere; }
 .result-url { margin: .35rem 0 .55rem; color: var(--muted); font: .8rem/1.5 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }
 .result-details { background: var(--surface-muted); border-radius: var(--control-radius); padding: .45rem .58rem; margin: 0 0 .58rem; font-size: .85rem; overflow-wrap: anywhere; }
 ul.result-details { padding-left: 1.65rem; }
@@ -55,7 +55,7 @@ ul.result-details { padding-left: 1.65rem; }
 @media (min-width: 1180px) {
   #check { grid-template-columns: minmax(18rem, .77fr) minmax(0, 1.23fr); }
   #check-form .fields { grid-template-columns: minmax(0, 1fr); gap: .63rem; }
-  #links { min-height: 11rem; white-space: pre-wrap; }
+  #links { min-height: 9.6rem; white-space: pre-wrap; }
   #check-form .input-actions { align-items: flex-end; }
 }
 @media (max-width: 670px) {

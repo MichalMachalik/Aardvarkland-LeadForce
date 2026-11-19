@@ -294,12 +294,14 @@ function overview() {
   const metricCards = metrics(Object.entries(stageNames).map(([stage, name]) => [name, counts.get(stage) ?? 0]));
   const output = [heading('Přehled týmu'), metricCards];
   const unread = state.notifications?.filter((item) => !item.read_at).length;
-  if (unread) output.push(actions(link('Nepřečtená upozornění (' + unread + ')', '#upozorneni', { className: 'button secondary' })));
-  if (state.handoffSummary?.active) output.push(actions(link('Otevřené reklamace (' + state.handoffSummary.active + ')', '#predani',
-    { className: 'button secondary' })));
+  const shortcuts = [];
+  if (unread) shortcuts.push(link('Nepřečtená upozornění (' + unread + ')', '#upozorneni', { className: 'button secondary' }));
+  if (state.handoffSummary?.active) shortcuts.push(link('Otevřené reklamace (' + state.handoffSummary.active + ')', '#predani',
+    { className: 'button secondary' }));
   if (typeof state.handoffAttention === 'number') {
-    output.push(actions(attentionLink('eskalace'), attentionLink('reakce'), attentionLink('prirazene')));
+    shortcuts.push(attentionLink('eskalace'), attentionLink('reakce'), attentionLink('prirazene'));
   }
+  if (shortcuts.length) output.push(node('div', { className: 'actions overview-actions' }, shortcuts));
   if (state.tasks) {
     const upcoming = state.tasks.filter((task) => !task.done_at).slice(0, 5);
     output.push(card('Otevřené úkoly', table(['Úkol', 'Termín', 'Odpovídá'], upcoming
@@ -705,7 +707,7 @@ const responseLabel = (route, count) => responseTitle(route) + ' (' + count + ')
 function attentionLink(route) {
   const { stateKey, alert } = responseCounters[route];
   const count = state[stateKey] ?? 0;
-  return link(responseLabel(route, count), '#' + route, { id: alert, className: 'button secondary attention-link', hidden: !count });
+  return link(responseLabel(route, count), '#' + route, { id: alert, className: 'button secondary', hidden: !count });
 }
 
 function updateCounter(route, count) {
