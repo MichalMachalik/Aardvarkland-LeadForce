@@ -36,11 +36,18 @@ async function verify() {
     await page.getByRole('link', { name: 'Zpět do Auditu' }).click();
     await page.waitForURL('**/audit-kampani/index.html?predani=1#leads');
     assert.match(await record.textContent(), /Předáno/);
+    await page.goto(new URL('tools/audit-kampani/index.html', base).href);
+    await page.waitForFunction(() => document.getElementById('data-scope')?.textContent.includes('bez záznamů'));
+    await page.goto(new URL('tools/kontrola-pred-spustenim/index.html', base).href);
+    assert.equal(await page.locator('#links').inputValue(), '');
+    await page.goto(new URL('tools/portal-investora/index.html#portfolio', base).href);
+    await page.locator('#positions-empty').waitFor();
+    assert.equal(await page.locator('#export-portfolio').isDisabled(), true);
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
   }
 }
 
-verify().then(() => console.log('PASS standalone checklist, audit and investor portal share a journey under one project URL'))
+verify().then(() => console.log('PASS standalone linked workflow and empty production tools'))
   .catch((error) => { console.error(error); process.exitCode = 1; });

@@ -4,6 +4,8 @@ const $ = (id) => document.getElementById(id);
 const screen = $('screen');
 const roleNames = { admin: 'Správce', marketing: 'Marketing', agent: 'Kvalifikace', care: 'Péče', investor: 'Investor', client: 'Klient' };
 const stageNames = { new: 'Nová', contacted: 'Kontaktována', qualified: 'Kvalifikovaná', handed: 'Předaná', closed: 'Uzavřená' };
+const closeReasons = [['invalid', 'Neplatný kontakt'], ['duplicate', 'Duplicitní poptávka'],
+  ['declined', 'Bez zájmu'], ['completed', 'Zpracováno'], ['other', 'Jiný důvod']];
 const claimReasons = {
   unreachable: 'Kontakt se nedaří zastihnout', invalid_contact: 'Neplatné kontaktní údaje',
   duplicate: 'Duplicitní poptávka', out_of_scope: 'Poptávka neodpovídá zadání', other: 'Jiný důvod',
@@ -12,12 +14,16 @@ const claimStates = { open: 'Nová reklamace', review: 'V řešení', accepted: 
 const events = {
   workspace_created: 'Založení organizace', lead_created: 'Založení poptávky', lead_assigned: 'Přiřazení poptávky',
   stage_changed: 'Změna stavu', note_added: 'Interní poznámka', task_added: 'Založení úkolu',
+  lead_contact_updated: 'Oprava kontaktu', task_updated: 'Úprava úkolu', task_reopened: 'Znovuotevření úkolu',
   task_done: 'Dokončení úkolu', invite_created: 'Vytvoření pozvánky', invite_accepted: 'Aktivace účtu', investor_linked: 'Propojení s účtem investora',
   user_activated: 'Opětovná aktivace účtu', user_disabled: 'Deaktivace účtu',
+  invite_revoked: 'Zrušení pozvánky', password_recovery_issued: 'Vytvoření odkazu pro obnovu hesla', password_recovered: 'Obnova hesla',
   position_created: 'Založení pozice', position_closed: 'Uzavření pozice',
   message_drafted: 'Koncept zprávy', message_published: 'Zveřejnění zprávy', password_changed: 'Změna hesla',
+  message_draft_updated: 'Úprava konceptu', message_draft_discarded: 'Zahození konceptu', investor_reply_added: 'Odpověď ve zprávě investora',
   client_created: 'Založení klienta', campaign_created: 'Založení kampaně', campaign_cost_saved: 'Změna nákladu kampaně',
   campaign_attached: 'Přiřazení klientské kampaně',
+  monthly_report_published: 'Zveřejnění měsíční uzávěrky',
   google_ads_configured: 'Napojení kampaně Google Ads', google_ads_sync: 'Synchronizace Google Ads',
   handoff_confirmed: 'Potvrzení převzetí klientem', handoff_claim_filed: 'Podaná reklamace',
   handoff_claim_review: 'Převzetí reklamace', handoff_claim_accepted: 'Uznaná reklamace', handoff_claim_rejected: 'Zamítnutá reklamace',
@@ -26,12 +32,12 @@ const events = {
   handoff_claim_assigned: 'Přiřazení řešitele reklamace', handoff_claim_released: 'Vrácení reklamace do fronty',
 };
 const available = {
-  admin: ['prehled', 'poptavky', 'predani', 'prirazene', 'reakce', 'eskalace', 'lhuty', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
-  marketing: ['prehled', 'poptavky', 'kampane', 'ucet'],
+  admin: ['prehled', 'poptavky', 'predani', 'prirazene', 'reakce', 'eskalace', 'lhuty', 'kampane', 'vykazy', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
+  marketing: ['prehled', 'poptavky', 'kampane', 'vykazy', 'ucet'],
   agent: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'ucet'],
   care: ['prehled', 'poptavky', 'predani', 'prirazene', 'reakce', 'eskalace', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
   investor: ['prehled', 'portfolio', 'schranka', 'ucet'],
-  client: ['prehled', 'reakce', 'ucet'],
+  client: ['prehled', 'vykazy', 'reakce', 'ucet'],
 };
 const titles = {
   prehled: ['Přehled', 'grid'], poptavky: ['Poptávky', 'list'], ukoly: ['Úkoly', 'check'],
@@ -41,6 +47,7 @@ const titles = {
   eskalace: ['Eskalace reklamací', 'clock'],
   lhuty: ['Lhůty reklamací', 'clock'],
   kampane: ['Klienti a kampaně', 'bag'],
+  vykazy: ['Měsíční uzávěrky', 'list'],
   upozorneni: ['Upozornění', 'mail'], investori: ['Investoři', 'bag'], komunikace: ['Zprávy pro investory', 'mail'],
   uzivatele: ['Uživatelé', 'user'], historie: ['Historie změn', 'clock'],
   portfolio: ['Portfolio', 'bag'], schranka: ['Zprávy', 'mail'], ucet: ['Můj účet', 'user'],
@@ -58,6 +65,8 @@ let state;
 let renderNumber = 0;
 let busy = false;
 let clientQuery = '';
+let leadFilters = { q: '', stage: '', page: 1 };
+let monthlyQuery = new URLSearchParams();
 let handoffParams = new URLSearchParams();
 let attentionPages = { reakce: 1, eskalace: 1, prirazene: 1 };
 let checkingAttention = false;
@@ -186,14 +195,16 @@ const refresh = async () => { state = await api('/api/state'); await render(); }
 const command = (name, data, message = 'Změna uložena.') => run(async () => {
   const result = await api('/api/actions/' + name, data);
   await refresh();
-  if (result.invite) {
-    const invite = new URL('./#pozvanka/' + result.invite, location.href).href;
-    const box = node('input', { readonly: true, value: invite, 'aria-label': 'Odkaz pozvánky' });
+  if (result.invite || result.recovery) {
+    const label = result.recovery ? 'Odkaz pro obnovu hesla' : 'Odkaz pozvánky';
+    const value = new URL('./#' + (result.recovery ? 'obnova/' + result.recovery : 'pozvanka/' + result.invite), location.href).href;
+    const box = node('input', { readonly: true, value, 'aria-label': label });
     const copy = actionButton('Zkopírovat', async () => {
-      try { await navigator.clipboard.writeText(invite); copy.textContent = 'Zkopírováno'; }
+      try { await navigator.clipboard.writeText(value); copy.textContent = 'Zkopírováno'; }
       catch { box.select(); }
     });
-    screen.prepend(card('Odkaz pozvánky', [node('p', { className: 'muted' }, 'Platí 24 hodin. Odkaz předejte pozvanému uživateli.'), actions(box, copy)], 'invite-result'));
+    const expiry = result.recovery ? 'Platí 30 minut a lze ho použít jednou. Předejte ho majiteli účtu.' : 'Platí 24 hodin. Odkaz předejte pozvanému uživateli.';
+    screen.prepend(card(label, [node('p', { className: 'muted' }, expiry), actions(box, copy)], 'invite-result'));
     requestAnimationFrame(() => {
       box.focus();
       box.select();
@@ -201,20 +212,24 @@ const command = (name, data, message = 'Změna uložena.') => run(async () => {
   } else notice(message);
 });
 
-function loginScreen(invitation) {
+function loginScreen(invitation, recovery) {
+  const route = recovery ? '/api/password/reset' : invitation ? '/api/invite/accept' : '/api/login';
+  const special = invitation || recovery;
   const submit = (data) => run(async () => {
-    await api(invitation ? '/api/invite/accept' : '/api/login', invitation ? { ...data, token: invitation } : data);
+    await api(route, special ? { ...data, token: special } : data);
     history.replaceState(null, '', '#prehled');
     await refresh();
   });
-  const fields = invitation
-    ? [field('Jméno', 'name', 'text', { autocomplete: 'name', maxlength: 100 }), field('Nové heslo', 'password', 'password', { minlength: 12, maxlength: 128, autocomplete: 'new-password' })]
+  const fields = special
+    ? [...(invitation ? [field('Jméno', 'name', 'text', { autocomplete: 'name', maxlength: 100 })] : []),
+      field('Nové heslo', 'password', 'password', { minlength: 12, maxlength: 128, autocomplete: 'new-password' })]
     : [field('Organizace', 'slug', 'text', { autocomplete: 'organization', maxlength: 48 }),
       field('E-mail', 'email', 'email', { autocomplete: 'username' }), field('Heslo', 'password', 'password', { autocomplete: 'current-password', maxlength: 128 })];
   const brand = node('div', { className: 'brand login-brand' },
     node('img', { className: 'mark', src: './assets/aardvarkland.png', width: 34, height: 34, alt: '' }), 'Aardvarkland LeadForce');
-  const login = node('div', { className: 'login' }, brand, heading(invitation ? 'Přijmout pozvánku' : 'Přihlášení do pracovního prostoru'));
-  if (!invitation && config.choices.length) {
+  const login = node('div', { className: 'login' }, brand,
+    heading(recovery ? 'Obnova hesla' : invitation ? 'Přijmout pozvánku' : 'Přihlášení do pracovního prostoru'));
+  if (!special && config.choices.length) {
     login.append(card('Vyberte roli', node('div', { className: 'profile-list' }, config.choices.map(({ key, role, name }) =>
       actionButton(roleNames[role] + ' · ' + name, () => run(async () => {
         await api('/api/example/session', { role: key ?? role });
@@ -222,13 +237,14 @@ function loginScreen(invitation) {
         await refresh();
       }))))));
   }
-  login.append(node('section', { className: 'card' }, form(invitation ? 'Založit účet' : 'Přihlásit se', fields, submit)));
-  if (browserDemo && !invitation) login.append(card('Samostatné nástroje', actions(
+  login.append(node('section', { className: 'card' }, form(recovery ? 'Nastavit nové heslo' : invitation ? 'Založit účet' : 'Přihlásit se', fields, submit)));
+  if (special) login.append(link('Zpět k přihlášení', '#', { className: 'button secondary' }));
+  if (browserDemo && !special) login.append(card('Samostatné nástroje', actions(
     link('Audit kampaní', './audit-kampani/', { className: 'button secondary' }),
     link('Kontrola odkazů', './kontrola-pred-spustenim/', { className: 'button secondary' }),
     link('Portál investora', './portal-investora/', { className: 'button secondary' }),
   )));
-  if (browserDemo && !invitation) login.append(actionButton('Obnovit výchozí data', () => {
+  if (browserDemo && !special) login.append(actionButton('Obnovit výchozí data', () => {
     if (!window.confirm('Zahodit změny této ukázky v prohlížeči?')) return;
     return run(async () => {
       await api('/api/example/reset', {});
@@ -267,7 +283,7 @@ function overview() {
     const next = active.find((item) => item.maturity >= localDate());
     return [heading('Přehled investora'),
       metrics([['Kapitál v aktivních pozicích', kcz.format(total)], ['Aktivní pozice', active.length],
-        ['Nepřečtené zprávy', state.messages.filter((item) => !item.read_at).length]], 'investor-metrics'),
+        ['Nepřečtené zprávy a odpovědi', state.messages.reduce((sum, item) => sum + Number(!item.read_at) + item.unread_replies, 0)]], 'investor-metrics'),
       actions(link('Zobrazit portfolio', '#portfolio', { className: 'button primary' }), link('Otevřít zprávy', '#schranka', { className: 'button secondary' })),
       next ? card('Nejbližší splatnost', [link(next.project, '#portfolio'), node('p', { className: 'muted' }, formatDate(next.maturity))], 'investor-section') : null,
       latest ? card('Poslední zpráva', [actionButton(latest.title, () => showMessage(latest, true), 'plain'),
@@ -304,26 +320,39 @@ function overview() {
   return output;
 }
 
-function leadList() {
+async function leadList() {
   const marketing = state.user.role === 'marketing';
-  const query = node('input', { type: 'search', placeholder: 'Hledat projekt, ID nebo jméno…', 'aria-label': 'Hledat poptávku' });
+  const query = node('input', { type: 'search', maxlength: 160, value: leadFilters.q,
+    placeholder: marketing ? 'Hledat projekt, kampaň nebo ID…' : 'Hledat projekt, ID nebo kontakt…', 'aria-label': 'Hledat poptávku' });
   const filter = node('select', { 'aria-label': 'Stav poptávky' }, node('option', { value: '' }, 'Všechny stavy'),
     Object.entries(stageNames).map(([value, name]) => node('option', { value }, name)));
+  filter.value = leadFilters.stage;
   const list = node('div');
-  const draw = () => {
-    const search = query.value.trim().toLowerCase();
-    const rows = state.leads.filter((row) => (!filter.value || row.stage === filter.value)
-      && [row.project, row.campaign, row.source, row.name ?? '', 'CRM-' + row.id].join(' ').toLowerCase().includes(search));
+  let pending;
+  let revision = 0;
+  async function draw(page) {
+    clearTimeout(pending);
+    const version = ++revision;
+    const requested = { q: query.value.trim(), stage: filter.value, page };
+    const data = await api('/api/leads?' + new URLSearchParams(requested));
+    if (version !== revision) return;
+    leadFilters = { ...requested, page: data.page };
+    const { rows } = data;
     list.replaceChildren(table(marketing ? ['ID', 'Projekt', 'Kanál', 'Stav'] : ['Poptávka', 'Projekt', 'Kanál', 'Stav', 'Odpovídá'],
       rows.map((row) => {
         const attrs = [row.project, row.source + ' · ' + row.campaign, pill(stageNames[row.stage], row.stage === 'handed' ? 'positive' : '')];
         return marketing ? ['CRM-' + row.id, ...attrs] : [link(row.name, '#poptavka/' + row.id), ...attrs, row.owner ?? 'Ve frontě'];
-      }), 'Tomuto výběru neodpovídá žádná poptávka.'));
-  };
-  query.addEventListener('input', draw);
-  filter.addEventListener('change', draw);
-  draw();
-  const output = [heading('Poptávky'), node('section', { className: 'card queue' }, actions(query, filter), list)];
+      }), 'Tomuto výběru neodpovídá žádná poptávka.'), pagination(data.page, data.pages, (next) => run(() => draw(next))));
+  }
+  query.addEventListener('input', () => {
+    revision++;
+    clearTimeout(pending);
+    pending = setTimeout(() => draw(1).catch((error) => { if (list.isConnected) notice(error.message, true); }), 180);
+  });
+  filter.addEventListener('change', () => void run(() => draw(1)));
+  await draw(leadFilters.page);
+  const output = [heading('Poptávky', actionButton('Obnovit seznam', () => run(refresh))),
+    node('section', { className: 'card queue' }, actions(query, filter), list)];
   if (state.clientManagement) {
     const options = campaignOptions(state.clientManagement.campaigns);
     const choice = field('Klientská kampaň', 'client_campaign', options, { required: false });
@@ -366,8 +395,18 @@ async function leadView(id) {
   if (role === assignment && lead.stage !== 'closed' && (!lead.owner_id || (role === 'care' && lead.owner_role === 'agent'))) {
     controls.push(actionButton('Převzít poptávku', () => command('assign', base), 'primary'));
   }
-  if (owner && editable && move[lead.stage]) controls.push(actions(move[lead.stage].map(([stage, title]) =>
-    actionButton(title, () => command('change-stage', { ...base, stage }), stage === 'closed' ? 'secondary' : 'primary'))));
+  if (owner && editable && move[lead.stage]) {
+    const next = move[lead.stage].filter(([stage]) => stage !== 'closed');
+    if (next.length) controls.push(actions(next.map(([stage, title]) => actionButton(title, () => command('change-stage', { ...base, stage }), 'primary'))));
+    controls.push(node('details', { className: 'editable-block' }, node('summary', {}, 'Uzavřít poptávku'),
+      form('Potvrdit uzavření', [field('Důvod uzavření', 'reason', closeReasons)],
+        (data) => command('change-stage', { ...base, ...data, stage: 'closed' }, 'Poptávka byla uzavřena.'))));
+  }
+  if (owner && lead.stage !== 'closed') controls.push(node('details', { className: 'editable-block' }, node('summary', {}, 'Upravit kontakt'),
+    form('Uložit kontakt', [
+      field('Jméno kontaktu', 'name', 'text', { value: lead.name, maxlength: 120 }),
+      field('E-mail kontaktu', 'email', 'email', { value: lead.email, readonly: Boolean(lead.investor_id) }),
+    ], (data) => command('edit-lead-contact', { ...base, ...data }, 'Kontakt byl opraven.'))));
   if (owner && ['admin', 'care'].includes(role) && lead.stage === 'handed' && !lead.investor_id) {
     controls.push(actionButton('Připojit účet investora', () => command('link-investor', base)));
   }
@@ -399,8 +438,17 @@ async function leadView(id) {
 function tasks() {
   const rows = state.tasks.map((item) => [item.title, item.lead, item.owner,
     pill(formatDate(item.due), !item.done_at && item.due < localDate() ? 'attention' : ''),
-    item.done_at ? 'Hotovo' : actionButton('Dokončit', () => command('complete-task', { id: item.id }))]);
+    item.done_at ? actions(pill('Hotovo', 'positive'), actionButton('Znovu otevřít', () => command('reopen-task', { id: item.id })))
+      : actions(actionButton('Dokončit', () => command('complete-task', { id: item.id })),
+        actionButton('Upravit úkol', () => editTask(item)))]);
   return [heading('Úkoly'), node('section', { className: 'card' }, table(['Úkol', 'Poptávka', 'Odpovídá', 'Termín', 'Stav'], rows, 'Zatím žádné úkoly.'))];
+}
+
+function editTask(item) {
+  const dialog = openDialog('Upravit úkol', form('Uložit úkol', [
+    field('Název úkolu', 'title', 'text', { value: item.title, maxlength: 160 }),
+    field('Termín úkolu', 'due', 'date', { value: item.due }),
+  ], (data) => saveDialog(dialog, 'edit-task', { ...data, id: item.id, previousTitle: item.title, previousDue: item.due }, 'Úkol byl upraven.')));
 }
 
 function notificationList() {
@@ -416,10 +464,14 @@ function notificationList() {
 function users() {
   const workspaceUsers = state.users.map((user) => [user.name, user.email, roleNames[user.role], user.client,
     pill(user.enabled ? 'Aktivní' : 'Deaktivovaný', user.enabled ? 'positive' : ''),
-    user.id === state.user.id ? 'Můj účet' : actionButton(user.enabled ? 'Deaktivovat' : 'Aktivovat', () => {
+    user.id === state.user.id ? 'Můj účet' : actions(actionButton(user.enabled ? 'Deaktivovat' : 'Aktivovat', () => {
       if (user.enabled && !window.confirm('Deaktivovat účet ' + user.name + ' a odhlásit jeho relace?')) return;
       return command('user-status', { id: user.id, enabled: !user.enabled });
-    })]);
+    }), user.enabled ? actionButton('Obnovit heslo', () => {
+      if (window.confirm('Vytvořit jednorázový odkaz pro účet ' + user.name + '?')) {
+        return command('issue-password-recovery', { id: user.id });
+      }
+    }) : null)]);
   const clientChoices = state.clientManagement.clients.map((item) => [item.id, item.name]);
   const roles = Object.entries(roleNames).filter(([role]) => role !== 'client' || clientChoices.length);
   const role = field('Role', 'role', roles);
@@ -427,7 +479,13 @@ function users() {
   return [heading('Uživatelé'), node('section', { className: 'card' },
     table(['Jméno', 'E-mail', 'Role', 'Klient', 'Stav', 'Akce'], workspaceUsers, 'Zatím žádní uživatelé.')),
   card('Pozvat uživatele', form('Vytvořit pozvánku', [field('E-mail', 'email', 'email'), role, client],
-    (data) => command('invite', data)))];
+    (data) => command('invite', data))),
+  card('Čekající pozvánky', table(['E-mail', 'Role', 'Klient', 'Platí do', 'Akce'], state.invitations.map((item) => [
+    item.email, roleNames[item.role], item.client, formatDate(new Date(item.expires).toISOString()),
+    actionButton('Zrušit pozvánku', () => {
+      if (window.confirm('Zrušit pozvánku pro ' + item.email + '?')) return command('revoke-invitation', { id: item.id }, 'Pozvánka byla zrušena.');
+    }),
+  ]), 'Žádná čekající pozvánka.'))];
 }
 
 const campaignOptions = (items) => items.map((item) => [item.id, item.name + ' · ' + item.code + (item.client ? ' · ' + item.client : '')]);
@@ -550,11 +608,7 @@ async function clientOverview() {
       field('Od', 'from', 'date', { value: from }), field('Do', 'to', 'date', { value: to }), choose,
     ], (data) => update(new URLSearchParams(data)))),
     card('Výkon kampaní', [
-      table(['Kampaň', 'Kanál', 'Evidovaný náklad', 'Předáno', 'Náklad na předání'], report.campaigns.map((row) => [
-        node('span', {}, node('strong', {}, row.name), node('small', { className: 'line-meta' }, row.code),
-          row.import_missing ? node('small', { className: 'line-meta' }, 'Chybějící dny Google Ads ' + row.import_missing) : null),
-        row.source, czk(row.cost_cents, 'Bez evidence'), String(row.handed), czk(row.unit_cents),
-      ]), 'V účtu zatím nejsou kampaně.'),
+      campaignBreakdown(report),
       node('p', { className: 'muted report-note' }, 'Náklad na předání vychází z výdajů a předání ve zvoleném období.'),
       report.totals.missing_cost ? node('p', { className: 'muted report-note' }, 'U některé kampaně s předáním chybí evidence nákladů.') : null,
       report.import_missing ? node('p', { className: 'muted report-note' }, 'Google Ads má ve zvoleném období nevykázané dny. U dotčených kampaní a v souhrnu je cena za předání dočasně prázdná.') : null,
@@ -568,6 +622,68 @@ async function clientOverview() {
       pagination(report.page, report.pages, page),
     ]),
   ];
+}
+
+function campaignBreakdown(report) {
+  return table(['Kampaň', 'Kanál', 'Evidovaný náklad', 'Předáno', 'Náklad na předání'], report.campaigns.map((row) => [
+    node('span', {}, node('strong', {}, row.name), node('small', { className: 'line-meta' }, row.code),
+      row.import_missing ? node('small', { className: 'line-meta' }, 'Chybějící dny Google Ads ' + row.import_missing) : null),
+    row.source, czk(row.cost_cents, 'Bez evidence'), String(row.handed), czk(row.unit_cents),
+  ]), 'V účtu zatím nejsou kampaně.');
+}
+
+async function monthlyReports() {
+  const staff = state.user.role !== 'client';
+  const clients = state.clientManagement?.clients ?? [];
+  if (staff && !clients.length) return [heading('Měsíční uzávěrky'), card('Klienti', empty('Nejprve založte klienta.'))];
+  const query = new URLSearchParams(monthlyQuery);
+  if (staff && !query.has('client')) query.set('client', clients[0].id);
+  const { rows, preview, previewKey } = await api('/api/monthly-reports?' + query);
+  const output = [heading('Měsíční uzávěrky', actionButton('Obnovit přehled', () => run(refresh)))];
+  if (staff) {
+    const first = new Date(reportDate().slice(0, 7) + '-01T00:00:00Z');
+    const max = new Date(first.setUTCDate(0)).toISOString().slice(0, 7);
+    const month = query.get('month') ?? max;
+    const client = field('Klient', 'client', clients.map((item) => [item.id, item.name]));
+    client.querySelector('select').value = query.get('client');
+    output.push(card('Podklady k uzávěrce', form('Načíst podklady', [
+      client, field('Měsíc', 'month', 'month', { value: month, max, placeholder: 'RRRR-MM' }),
+    ], (data) => run(async () => {
+      const previous = monthlyQuery;
+      monthlyQuery = new URLSearchParams(data);
+      try { await render(true); } catch (error) { monthlyQuery = previous; throw error; }
+    }))));
+    if (preview) {
+      const version = rows.find((row) => row.month === month)?.revision ?? 0;
+      const complete = !preview.import_missing && !preview.totals.missing_cost && preview.totals.cost_cents !== null;
+      output.push(card('Náhled · ' + month, [
+        campaignBreakdown(preview),
+        !complete ? node('p', { className: 'muted' }, 'Před uzávěrkou doplňte evidenci nákladů a chybějící dny Google Ads.') : null,
+        complete && state.user.role === 'admin' ? form('Zveřejnit uzávěrku', [
+          field(version ? 'Důvod nové verze' : 'Poznámka k uzávěrce', 'note', 'textarea', { required: Boolean(version), maxlength: 500 }),
+        ], (data) => command('publish-monthly-report', { client: query.get('client'), month, revision: version,
+          preview: previewKey, ...data }, 'Uzávěrka byla zveřejněna.')) : null,
+      ]));
+    }
+  }
+  output.push(card('Zveřejněné uzávěrky', table(['Měsíc', 'Verze', 'Zveřejněno', 'Poznámka', 'Export'], rows.map((row) => [
+    link(row.month, '#vykazy/' + row.id), 'v' + row.revision, formatDate(row.published_at), row.note,
+    csvLink('Stáhnout CSV', '/api/monthly-reports/' + row.id + '.csv', 'uzaverka-' + row.month + '-v' + row.revision + '.csv'),
+  ]), 'Zatím nejsou zveřejněné uzávěrky.')));
+  return output;
+}
+
+async function monthlyDetail(id) {
+  const { month, revision, note, published_at, report } = await api('/api/monthly-reports/' + id);
+  return [heading(month + ' · v' + revision, link('Zpět k uzávěrkám', '#vykazy', { className: 'button secondary' })),
+    card(report.client, [
+      node('p', { className: 'muted' }, 'Zveřejněno ' + formatDate(published_at)),
+      note ? node('p', { className: 'prose' }, note) : null,
+      metrics([['Předané poptávky', report.totals.handed], ['Evidované náklady', czk(report.totals.cost_cents)],
+        ['Náklad na předání', czk(report.totals.unit_cents)]]),
+      campaignBreakdown(report),
+      csvLink('Stáhnout uzávěrku CSV', '/api/monthly-reports/' + id + '.csv', 'uzaverka-' + month + '-v' + revision + '.csv'),
+    ])];
 }
 
 const receiptStatus = (row) => pill(row.confirmed_at ? 'Potvrzeno' : 'Čeká na potvrzení', row.confirmed_at ? 'positive' : '');
@@ -822,7 +938,9 @@ function positions(isInvestor) {
       if (window.confirm('Označit pozici jako splacenou?')) return command('close-position', { id: row.id });
     }) : '—'])]);
   const columns = ['Projekt', ...(isInvestor ? [] : ['Investor']), 'Kapitál', 'Splatnost', 'Stav', ...(isInvestor ? [] : ['Akce'])];
-  const output = [heading(isInvestor ? 'Moje portfolio' : 'Pozice investorů'), node('section', { className: 'card' }, table(columns, rows, 'Zatím žádné pozice.'))];
+  const output = [heading(isInvestor ? 'Moje portfolio' : 'Pozice investorů',
+    isInvestor && rows.length ? csvLink('Stáhnout portfolio CSV', '/api/export/portfolio.csv', 'portfolio.csv') : null),
+  node('section', { className: 'card' }, table(columns, rows, 'Zatím žádné pozice.'))];
   if (!isInvestor) output.push(card('Přidat pozici', state.investors.length ? form('Uložit pozici', [
     field('Investor', 'investor', state.investors.map((row) => [row.id, row.name + ' · ' + row.email])),
     field('Projekt', 'project'), field('Kapitál v Kč', 'principal', 'text', { inputmode: 'decimal' }), field('Splatnost', 'maturity', 'date'),
@@ -830,29 +948,98 @@ function positions(isInvestor) {
   return output;
 }
 
-function showMessage(item, receipt) {
-  const dialog = node('dialog', { 'aria-label': item.title }, heading(item.title),
-    node('p', { className: 'muted' }, formatDate(item.published_at || item.created_at)), node('p', { className: 'prose' }, item.body),
+function openDialog(title, ...content) {
+  const dialog = node('dialog', { 'aria-label': title }, heading(title), content,
     node('form', { method: 'dialog' }, node('button', { className: 'button secondary', type: 'submit' }, 'Zavřít')));
   document.body.append(dialog);
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
   dialog.showModal();
-  if (receipt && !item.read_at) void run(async () => {
-    await api('/api/actions/read-message', { id: item.id });
-    const refreshAfter = () => { void run(refresh); };
-    if (dialog.open) dialog.addEventListener('close', refreshAfter, { once: true });
-    else await refresh();
-  });
+  return dialog;
+}
+
+async function saveDialog(dialog, action, data, message) {
+  let error = dialog.querySelector('.dialog-error');
+  if (error) error.remove();
+  try {
+    await api('/api/actions/' + action, data);
+    dialog.close();
+    await refresh();
+    notice(message);
+  } catch (failure) {
+    if (!dialog.open) return notice(failure.message, true);
+    error = node('p', { className: 'dialog-error', role: 'alert' }, failure.message);
+    dialog.append(error);
+  }
+}
+
+function showMessage(item, investor) {
+  const thread = node('section', { className: 'message-thread' });
+  const feedback = node('p', { className: 'muted', role: 'status', hidden: true });
+  const dialog = openDialog(item.title, node('p', { className: 'muted' }, formatDate(item.published_at || item.created_at)),
+    node('p', { className: 'prose' }, item.body), thread, feedback);
+  if (!item.published_at) return;
+  let changed = false;
+  let pending;
+  const note = (value) => { feedback.textContent = value; feedback.hidden = !value; };
+
+  async function drawThread() {
+    const { replies } = await api('/api/investor-messages/' + item.id);
+    if (!dialog.open) return;
+    const requestKey = crypto.randomUUID();
+    thread.replaceChildren(node('h2', {}, 'Vlákno zprávy'),
+      replies.length ? node('ol', { className: 'claim-thread' }, replies.map((entry) => node('li', {},
+        actions(node('strong', {}, entry.author), node('time', {}, formatDate(entry.created_at))), node('p', { className: 'prose' }, entry.body))))
+        : empty('Zatím bez odpovědí.'),
+      form('Odeslat odpověď', [field('Odpověď', 'reply', 'textarea', { maxlength: 4000 })], (data) => {
+        note('');
+        pending = api('/api/actions/reply-investor-message', { id: item.id, request_key: requestKey, ...data }).then(async () => {
+          changed = true;
+          await drawThread();
+          note('Odpověď byla uložena do vlákna.');
+        }).catch((error) => note(error.message));
+        return pending;
+      }));
+    if (replies.some((entry) => entry.unread)) {
+      await api('/api/actions/read-investor-thread', { id: item.id, through: replies.at(-1)?.id });
+      changed = true;
+    }
+  }
+
+  const receipt = investor && !item.read_at ? api('/api/actions/read-message', { id: item.id }).then(() => { changed = true; }) : Promise.resolve();
+  pending = receipt.then(drawThread).catch((error) => note(error.message));
+  dialog.addEventListener('close', () => {
+    void pending.finally(() => { if (changed) void run(refresh); });
+  }, { once: true });
+}
+
+function editDraft(item) {
+  const person = field('Investor', 'investor', state.investors.map((row) => [row.id, row.name + ' · ' + row.email]));
+  person.querySelector('select').value = item.investor_id;
+  const body = field('Zpráva', 'body', 'textarea', { maxlength: 6000 });
+  body.querySelector('textarea').value = item.body;
+  const dialog = openDialog('Upravit koncept', form('Uložit změny konceptu', [
+    person, field('Předmět', 'title', 'text', { value: item.title, maxlength: 160 }), body,
+  ], (data) => saveDialog(dialog, 'edit-message-draft', { ...data, id: item.id, revision: item.revision }, 'Koncept byl upraven.')));
 }
 
 function messages(isInvestor) {
   const visible = state.messages.map((item) => [
     actionButton(item.title, () => showMessage(item, isInvestor), 'plain'), ...(isInvestor ? [] : [item.investor]),
     item.published_at ? formatDate(item.published_at) : '—',
-    pill(!item.published_at ? 'Koncept' : item.read_at ? 'Přečtená' : 'Nepřečtená', item.published_at && !item.read_at ? 'positive' : ''),
-    ...(isInvestor ? [] : [item.published_at ? '—' : actionButton('Zveřejnit', () => {
-      if (window.confirm('Zveřejnit tuto zprávu v účtu ' + item.investor + '?')) return command('publish-message', { id: item.id });
-    })]),
+    actions(pill(!item.published_at ? 'Koncept' : item.read_at ? 'Přečtená' : 'Nepřečtená', item.published_at && !item.read_at ? 'positive' : ''),
+      item.unread_replies ? pill('Nové odpovědi · ' + item.unread_replies, 'attention') : null),
+    ...(isInvestor ? [] : [item.published_at ? '—' : actions(
+      actionButton('Upravit koncept', () => editDraft(item)),
+      actionButton('Zveřejnit', () => {
+        if (window.confirm('Zveřejnit tuto zprávu v účtu ' + item.investor + '?')) {
+          return command('publish-message', { id: item.id, revision: item.revision });
+        }
+      }),
+      actionButton('Zahodit koncept', () => {
+        if (window.confirm('Zahodit koncept „' + item.title + '“?')) {
+          return command('discard-message-draft', { id: item.id, revision: item.revision }, 'Koncept byl zahozen.');
+        }
+      }))]),
   ]);
   const columns = ['Zpráva', ...(isInvestor ? [] : ['Příjemce']), 'Zveřejněno', 'Stav', ...(isInvestor ? [] : ['Akce'])];
   const output = [heading(isInvestor ? 'Moje zprávy' : 'Zprávy pro investory'), node('section', { className: 'card' }, table(columns, visible, 'Zatím žádné zprávy.'))];
@@ -895,7 +1082,7 @@ const views = {
   prehled: overview, poptavky: leadList, kampane: campaignManagement, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
   predani: handoffInbox,
   reakce: () => handoffAttention('reakce'), eskalace: () => handoffAttention('eskalace'), prirazene: () => handoffAttention('prirazene'),
-  lhuty: claimCalendarSettings,
+  lhuty: claimCalendarSettings, vykazy: monthlyReports,
   komunikace: () => messages(false), portfolio: () => positions(true), schranka: () => messages(true),
   historie: () => [heading('Historie změn'), card('Aktivita organizace', timeline(state.activity))], ucet: account,
 };
@@ -927,21 +1114,25 @@ async function render(propagateError = false) {
   const revision = ++renderNumber;
   const hash = location.hash.slice(1);
   const invite = /^pozvanka\/([A-Za-z0-9_-]{43})$/.exec(hash);
-  if (!state || invite) {
+  const recovery = /^obnova\/([A-Za-z0-9_-]{43})$/.exec(hash);
+  if (!state || invite || recovery) {
     navigation(null);
-    screen.replaceChildren(loginScreen(invite?.[1]));
+    screen.replaceChildren(loginScreen(invite?.[1], recovery?.[1]));
     return;
   }
   const lead = /^poptavka\/(\d{1,12})$/.exec(hash);
   const handoff = /^predani\/(\d{1,12})(?:\/(reakce|eskalace|prirazene))?$/.exec(hash);
   const role = state.user.role;
   const maySeeHandoff = ['admin', 'care', 'client'].includes(role);
-  const route = handoff && maySeeHandoff ? (handoff[2] || (role === 'client' ? 'prehled' : 'predani')) : lead ? 'poptavky' : hash;
+  const monthly = /^vykazy\/(\d{1,12})$/.exec(hash);
+  const route = handoff && maySeeHandoff ? (handoff[2] || (role === 'client' ? 'prehled' : 'predani'))
+    : monthly ? 'vykazy' : lead ? 'poptavky' : hash;
   const active = available[role].includes(route) ? route : 'prehled';
   const report = active === 'prehled' && state.user.role === 'client';
   navigation(active);
   try {
     const content = handoff && maySeeHandoff ? await handoffView(handoff[1], active) : report ? await clientOverview()
+      : monthly && active === 'vykazy' ? await monthlyDetail(monthly[1])
       : lead && active === 'poptavky' && state.user.role !== 'marketing' ? await leadView(lead[1]) : await views[active]();
     if (revision === renderNumber) screen.replaceChildren(...content);
   } catch (e) {
@@ -952,7 +1143,9 @@ async function render(propagateError = false) {
     else if (report || active === 'predani') screen.replaceChildren(heading(report ? 'Klientský přehled' : 'Předání klientům'),
       empty(e.message), actionButton('Obnovit přehled', () => run(refresh)));
     else if (responseCounters[active]) screen.replaceChildren(heading(responseTitle(active)), empty(e.message), actionButton('Obnovit seznam', () => run(refresh)));
-    else screen.replaceChildren(heading('Poptávka'), empty(e.message), link('Zpět k poptávkám', '#poptavky'));
+    else if (active === 'vykazy') screen.replaceChildren(heading('Měsíční uzávěrky'), empty(e.message), link('Zpět k uzávěrkám', '#vykazy'));
+    else if (lead) screen.replaceChildren(heading('Poptávka'), empty(e.message), link('Zpět k poptávkám', '#poptavky'));
+    else screen.replaceChildren(heading(titles[active][0]), empty(e.message), actionButton('Obnovit přehled', () => run(refresh)));
   }
 }
 
@@ -960,6 +1153,8 @@ $('logout').addEventListener('click', () => void run(async () => {
   await api('/api/logout', {});
   state = undefined;
   clientQuery = '';
+  leadFilters = { q: '', stage: '', page: 1 };
+  monthlyQuery = new URLSearchParams();
   handoffParams = new URLSearchParams();
   attentionPages = { reakce: 1, eskalace: 1, prirazene: 1 };
   adsFormValues = {};
@@ -982,10 +1177,18 @@ window.addEventListener('focus', refreshAttention);
 document.addEventListener('visibilitychange', refreshAttention);
 setInterval(refreshAttention, 15000);
 
-try {
-  config = await api('/api/config');
-  try { state = await api('/api/state'); } catch (error) { if (error.status !== 401) throw error; }
-  await render();
-} catch (error) {
-  notice(error.message, true);
+async function startWorkspace() {
+  notice('');
+  screen.replaceChildren(node('p', { className: 'empty', role: 'status' }, 'Načítám pracovní prostor…'));
+  try {
+    config = await api('/api/config');
+    state = undefined;
+    try { state = await api('/api/state'); } catch (error) { if (error.status !== 401) throw error; }
+    await render();
+  } catch (error) {
+    screen.replaceChildren(heading('Pracovní prostor'), actionButton('Zkusit znovu', startWorkspace));
+    notice(error.message, true);
+  }
 }
+
+await startWorkspace();

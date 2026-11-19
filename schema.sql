@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   csrf TEXT NOT NULL, expires INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS password_recoveries (
+  token_hash TEXT PRIMARY KEY, workspace_id INTEGER NOT NULL, user_id INTEGER NOT NULL, expires INTEGER NOT NULL,
+  UNIQUE (workspace_id,user_id),
+  FOREIGN KEY (workspace_id,user_id) REFERENCES users(workspace_id,id)
+) STRICT;
 CREATE TABLE IF NOT EXISTS invitations (
   token_hash TEXT PRIMARY KEY, workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
   email TEXT NOT NULL COLLATE NOCASE, role TEXT NOT NULL,
@@ -73,6 +78,15 @@ CREATE TABLE IF NOT EXISTS messages (
   FOREIGN KEY (workspace_id,author_id) REFERENCES users(workspace_id,id)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS messages_investor ON messages(workspace_id,investor_id,published_at);
+CREATE UNIQUE INDEX IF NOT EXISTS messages_workspace_id ON messages(workspace_id,id);
+CREATE TABLE IF NOT EXISTS investor_message_replies (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+  author_id INTEGER NOT NULL, request_key TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT,
+  UNIQUE (workspace_id,message_id,request_key),
+  FOREIGN KEY (workspace_id,message_id) REFERENCES messages(workspace_id,id),
+  FOREIGN KEY (workspace_id,author_id) REFERENCES users(workspace_id,id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS investor_replies_thread ON investor_message_replies(workspace_id,message_id,id);
 CREATE TABLE IF NOT EXISTS activity (
   id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, actor_id INTEGER NOT NULL,
   lead_id INTEGER, action TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -117,6 +131,14 @@ CREATE TABLE IF NOT EXISTS client_leads (
   FOREIGN KEY (workspace_id,campaign_id) REFERENCES client_campaigns(workspace_id,id)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS client_leads_reports ON client_leads(workspace_id,campaign_id,handed_day,lead_id);
+CREATE TABLE IF NOT EXISTS client_monthly_reports (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, client_id INTEGER NOT NULL,
+  month TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, note TEXT NOT NULL,
+  published_by INTEGER NOT NULL, published_at TEXT NOT NULL,
+  UNIQUE (workspace_id,client_id,month,revision),
+  FOREIGN KEY (workspace_id,client_id) REFERENCES clients(workspace_id,id),
+  FOREIGN KEY (workspace_id,published_by) REFERENCES users(workspace_id,id)
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS handoff_receipts (
   workspace_id INTEGER NOT NULL, lead_id INTEGER NOT NULL, confirmed_by INTEGER NOT NULL, confirmed_at TEXT NOT NULL,

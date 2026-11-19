@@ -102,7 +102,7 @@ async function demo({ page }) {
   await audit.close();
   await goto(marketing, 'Poptávky');
   await titled(marketing, 'Poptávky');
-  await set(marketing, { Jméno: 'Karolína Procházková', 'E-mail': 'karolina@test.example', Projekt: 'Habr 2', Kanál: 'Meta', 'ID kampaně': 'M-222' });
+  await set(marketing, { Jméno: 'Karolína Procházková', 'E-mail': 'karolina-omyl@test.example', Projekt: 'Habr 2', Kanál: 'Meta', 'ID kampaně': 'M-222' });
   await btn(marketing, 'Přidat poptávku').click();
   await marketing.getByText('Meta · M-222', { exact: true }).waitFor();
   assert.equal(await marketing.getByText('Karolína Procházková', { exact: true }).count(), 0);
@@ -111,9 +111,14 @@ async function demo({ page }) {
   await btn(agent, /^Kvalifikace ·/).click();
   await titled(agent, 'Přehled týmu');
   await goto(agent, 'Poptávky');
+  await agent.getByLabel('Hledat poptávku').fill('karolina prochazkova');
   await agent.getByRole('link', { name: 'Karolína Procházková' }).click();
   await titled(agent, 'Karolína Procházková');
   await btn(agent, 'Převzít poptávku').click();
+  await agent.getByText('Upravit kontakt', { exact: true }).click();
+  await set(agent, { 'E-mail kontaktu': 'karolina@test.example' });
+  await btn(agent, 'Uložit kontakt').click();
+  await agent.getByText('Kontakt byl opraven.').waitFor();
   await btn(agent, 'Označit jako kontaktovanou').click();
   await agent.getByText('Kontaktována', { exact: true }).waitFor();
   await set(agent, { 'Interní poznámka': 'Předání domluveno na dopoledne.' });
@@ -159,8 +164,13 @@ async function demo({ page }) {
   await btn(care, 'Přidat úkol').click();
   await care.getByText('Změna uložena.', { exact: true }).waitFor();
   await goto(care, 'Úkoly');
-  await care.getByRole('row', { name: /Domluvit schůzku/ }).getByRole('button', { name: 'Dokončit' }).click();
-  await care.getByRole('row', { name: /Domluvit schůzku.*Hotovo/ }).waitFor();
+  await care.getByRole('row', { name: /Domluvit schůzku/ }).getByRole('button', { name: 'Upravit úkol' }).click();
+  await set(care, { 'Název úkolu': 'Potvrdit schůzku', 'Termín úkolu': '2026-12-19' });
+  await btn(care, 'Uložit úkol').click();
+  const task = care.getByRole('row').filter({ hasText: 'Potvrdit schůzku' });
+  await task.getByRole('button', { name: 'Dokončit', exact: true }).click();
+  await task.getByRole('button', { name: 'Znovu otevřít', exact: true }).click();
+  await task.getByRole('button', { name: 'Dokončit', exact: true }).waitFor();
 
   await goto(care, 'Investoři');
   await titled(care, 'Pozice investorů');
@@ -173,9 +183,18 @@ async function demo({ page }) {
   await care.getByLabel('Investor', { exact: true }).selectOption({ label: 'Karolína Procházková · karolina@test.example' });
   await set(care, { Předmět: 'Přehled Habr 2', Zpráva: 'Připravili jsme aktualizaci k projektu.' });
   await btn(care, 'Uložit koncept').click();
-  await care.getByRole('row', { name: /Přehled Habr 2.*Koncept/ }).waitFor();
+  const draft = care.getByRole('row', { name: /Přehled Habr 2.*Koncept/ });
+  await draft.getByRole('button', { name: 'Upravit koncept' }).click();
+  await set(care.getByRole('dialog'), { Zpráva: 'Připravili jsme aktualizaci k projektu na pátek.' });
+  await btn(care, 'Uložit změny konceptu').click();
+  await care.getByText('Koncept byl upraven.').waitFor();
   await newInvestor.reload();
   await newInvestor.getByRole('row', { name: /Habr 2/ }).waitFor();
+  const [portfolio] = await Promise.all([
+    newInvestor.waitForEvent('download'),
+    newInvestor.getByRole('link', { name: 'Stáhnout portfolio CSV' }).click(),
+  ]);
+  assert.match(await readFile(await portfolio.path(), 'utf8'), /"Habr 2";"1250,50";"2028-09-30"/);
   assert.equal(await newInvestor.getByText('Park Habr', { exact: true }).count(), 0);
   await goto(newInvestor, 'Zprávy');
   await newInvestor.getByText('Zatím žádné zprávy.').waitFor();
@@ -184,9 +203,17 @@ async function demo({ page }) {
   await care.getByRole('row', { name: /Přehled Habr 2.*Nepřečtená/ }).waitFor();
   await newInvestor.reload();
   await btn(newInvestor, 'Přehled Habr 2').click();
-  await newInvestor.getByRole('dialog').getByText('Připravili jsme aktualizaci k projektu.').waitFor();
+  await newInvestor.getByRole('dialog').getByText('Připravili jsme aktualizaci k projektu na pátek.').waitFor();
+  await set(newInvestor.getByRole('dialog'), { Odpověď: 'Děkuji, pátek mi vyhovuje.' });
+  await btn(newInvestor, 'Odeslat odpověď').click();
+  await newInvestor.getByRole('dialog').getByText('Děkuji, pátek mi vyhovuje.').waitFor();
   await btn(newInvestor, 'Zavřít').click();
   await newInvestor.getByRole('row', { name: /Přehled Habr 2.*Přečtená/ }).waitFor();
+  await care.reload();
+  await care.getByText('Nové odpovědi · 1', { exact: true }).waitFor();
+  await btn(care, 'Přehled Habr 2').click();
+  await care.getByRole('dialog').getByText('Děkuji, pátek mi vyhovuje.').waitFor();
+  await btn(care, 'Zavřít').click();
   assert.equal(await newInvestor.getByText('Předání domluveno na dopoledne.').count(), 0);
   assert.equal(await newInvestor.getByRole('link', { name: 'Upozornění' }).count(), 0);
 
@@ -302,6 +329,72 @@ async function clientPortal({ page }) {
   await titled(another, 'Klientský přehled');
   await another.getByText('David Koutný', { exact: true }).waitFor();
   assert.equal(await another.getByText('Erik Zelený', { exact: true }).count(), 0);
+
+  await btn(client, 'Navigace').click();
+  await goto(client, 'Měsíční uzávěrky');
+  await titled(client, 'Měsíční uzávěrky');
+  const reference = client.getByRole('link', { name: /^\d{4}-\d{2}$/ });
+  const month = (await reference.textContent()).trim();
+  await reference.click();
+  await titled(client, month + ' · v1');
+  assert.equal((await client.locator('.metric dd').nth(1).textContent()).replace(/\s/g, ''), '1250Kč');
+  const [original] = await Promise.all([
+    client.waitForEvent('download'),
+    client.getByRole('link', { name: 'Stáhnout uzávěrku CSV' }).click(),
+  ]);
+  assert.match(await readFile(await original.path(), 'utf8'), /"1250,00"/);
+  await goto(admin, 'Klienti a kampaně');
+  await admin.getByLabel('Kampaň', { exact: true }).selectOption({ label: 'Brandová kampaň · LPF-603 · Lípové bydlení' });
+  await set(admin, { 'Datum nákladu': month + '-01', 'Náklad v Kč': '1300' });
+  await btn(admin, 'Uložit denní náklad').click();
+  await admin.getByText('Denní náklad uložen.').waitFor();
+  await goto(admin, 'Měsíční uzávěrky');
+  await titled(admin, 'Měsíční uzávěrky');
+  await admin.getByRole('combobox', { name: 'Klient', exact: true }).selectOption({ label: 'Lípové bydlení' });
+  await set(admin, { Měsíc: month });
+  await btn(admin, 'Načíst podklady').click();
+  await set(admin, { 'Důvod nové verze': 'Upřesnění nákladů kampaně.' });
+  await btn(admin, 'Zveřejnit uzávěrku').click();
+  await admin.getByText('Uzávěrka byla zveřejněna.').waitFor();
+  await client.reload();
+  await titled(client, month + ' · v1');
+  assert.equal((await client.locator('.metric dd').nth(1).textContent()).replace(/\s/g, ''), '1250Kč');
+  await client.getByRole('link', { name: 'Zpět k uzávěrkám' }).click();
+  await client.getByRole('row', { name: /v2/ }).getByRole('link', { name: month }).click();
+  await titled(client, month + ' · v2');
+  assert.equal((await client.locator('.metric dd').nth(1).textContent()).replace(/\s/g, ''), '1300Kč');
+}
+
+async function accessWorkflow({ page }) {
+  const admin = await page();
+  await btn(admin, /^Správce ·/).click();
+  await goto(admin, 'Uživatelé');
+  await titled(admin, 'Uživatelé');
+  await set(admin, { 'E-mail': 'pozvanka@qa.example' });
+  await admin.getByLabel('Role', { exact: true }).selectOption('marketing');
+  await btn(admin, 'Vytvořit pozvánku').click();
+  const old = await admin.getByLabel('Odkaz pozvánky').inputValue();
+  admin.once('dialog', (dialog) => dialog.accept());
+  await btn(admin, 'Zrušit pozvánku').click();
+  await admin.getByText('Pozvánka byla zrušena.').waitFor();
+  const rejected = await page();
+  await rejected.goto(old);
+  await set(rejected, { Jméno: 'Fiktivní test', 'Nové heslo': 'Fiktivni-Overeni-2026!' });
+  await btn(rejected, 'Založit účet').click();
+  await rejected.getByText('Pozvánka vypršela nebo již byla použita.').waitFor();
+  const existing = await page();
+  await btn(existing, /^Marketing ·/).click();
+  await titled(existing, 'Přehled týmu');
+  admin.once('dialog', (dialog) => dialog.accept());
+  await admin.getByRole('row', { name: /Nina Vacková/ }).getByRole('button', { name: 'Obnovit heslo' }).click();
+  const recovery = await admin.getByLabel('Odkaz pro obnovu hesla').inputValue();
+  await rejected.goto(recovery);
+  await titled(rejected, 'Obnova hesla');
+  await set(rejected, { 'Nové heslo': 'Fiktivni-Obnovene-2026!' });
+  await btn(rejected, 'Nastavit nové heslo').click();
+  await titled(rejected, 'Přehled týmu');
+  await existing.reload();
+  await titled(existing, 'Přihlášení do pracovního prostoru');
 }
 
 async function published(context) {
@@ -309,6 +402,7 @@ async function published(context) {
   await clientPortal(context);
   await googleAdsPilot(context);
   await claimWorkflows(context);
+  await accessWorkflow(context);
   const isolated = await context.page(1366, true);
   await btn(isolated, /^Správce ·/).click();
   await goto(isolated, 'Poptávky');
@@ -340,6 +434,13 @@ async function googleAdsPilot({ page }) {
   await titled(editor, 'Přehled týmu');
   await goto(editor, 'Klienti a kampaně');
   await editor.getByRole('heading', { name: 'Import Google Ads' }).waitFor();
+  const importFrom = await editor.getByLabel('Import od').inputValue();
+  const importTo = await editor.getByLabel('Import do').inputValue();
+  await editor.getByRole('combobox', { name: 'Kampaň', exact: true }).selectOption({ label: 'Byty pod Lípou · LPF-601 · Lípové bydlení' });
+  await set(editor, { 'Náklad v Kč': '2100' });
+  await btn(editor, 'Uložit denní náklad').click();
+  await editor.getByText('Denní náklad uložen.').waitFor();
+  await set(editor, { 'Import od': importFrom, 'Import do': importTo });
   const panel = editor.getByRole('region', { name: 'Výsledek importu Byty pod Lípou' });
   const sync = async (scenario, expected) => {
     await editor.getByLabel('Scénář zdroje').selectOption(scenario);
@@ -573,7 +674,7 @@ const demoWorkflows = async (context) => {
 };
 const check = process.env.TEST_URL
   ? exerciseBrowser(process.env.TEST_URL, [], process.env.FEEDBACK_ONLY ? claimWorkflows : published, true)
-  : openCase(true, demoWorkflows).then(() => openCase(false, blank));
+  : openCase(true, demoWorkflows).then(() => openCase(true, accessWorkflow)).then(() => openCase(false, blank));
 check.then(() => {
-  console.log('PASS browser claim assignment and transfer, evidence, deadline, escalation and resolution');
+  console.log('PASS workspace roles, CRM, campaigns, monthly reports, investor communication and complaints');
 }).catch((error) => { console.error(error); process.exitCode = 1; });

@@ -16,6 +16,10 @@ const unauthorized = () => { throw new Failure(403, 'K této akci nemáte opráv
 const missing = () => { throw new Failure(404, 'Záznam nebyl nalezen.'); };
 const allow = (actor, ...allowed) => { if (!allowed.includes(actor.role)) unauthorized(); };
 const uniqueConflict = (error) => error?.errcode === 2067;
+const searchText = (value) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+const closeReasons = { invalid: 'Neplatný kontakt', duplicate: 'Duplicitní poptávka',
+  declined: 'Bez zájmu', completed: 'Zpracováno', other: 'Jiný důvod' };
+const dummyPasswords = new WeakMap();
 
 function slug(value) {
   const result = text(value, 'Identifikátor organizace', 48).toLowerCase();
@@ -26,6 +30,7 @@ function slug(value) {
 export function createStore(db, schema, { hash, passwordDigest, passwordMatches, token }, { claimClock = Date.now } = {}) {
   const upgraded = initializeSchema(db, schema);
   db.function('claim_business_due', { deterministic: true }, claimDeadlineCalculator());
+  db.function('search_text', { deterministic: true }, searchText);
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
@@ -40,11 +45,12 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       throw error;
     }
   };
-  const missingPassword = passwordDigest(token());
+  if (!dummyPasswords.has(passwordDigest)) dummyPasswords.set(passwordDigest, passwordDigest(token()));
+  const missingPassword = dummyPasswords.get(passwordDigest);
   const event = (actor, action, detail = '', lead = null) =>
     run('INSERT INTO activity (workspace_id,actor_id,lead_id,action,detail,created_at) VALUES (?,?,?,?,?,?)',
       actor.workspace_id, actor.id, lead, action, detail, now());
-  const clients = clientAccounts({ get, all, run, event, allow });
+  const clients = clientAccounts({ get, all, run, event, allow, hash });
   const feedback = handoffFeedback({ get, all, run, event, allow, clientName: clients.clientName, clock: claimClock });
   const googleAds = googleAdsStore({ get, all, run, event, allow, transaction });
   const publicActor = ({ id: userId, name, email: address, role, slug: org, workspace }) =>
@@ -104,11 +110,34 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     if (!row || !passwordMatches(old, row.password)) throw new Failure(422, 'Aktuální heslo nesouhlasí.');
     const digest = passwordDigest(next);
     transaction(() => {
-      run('UPDATE users SET password=? WHERE workspace_id=? AND id=?', digest, actor.workspace_id, actor.id);
+      const saved = run('UPDATE users SET password=? WHERE workspace_id=? AND id=? AND enabled=1 AND password=?',
+        digest, actor.workspace_id, actor.id, row.password);
+      if (!saved.changes) throw new Failure(409, 'Účet se mezitím změnil. Přihlaste se znovu.');
       run('DELETE FROM sessions WHERE user_id=?', actor.id);
+      run('DELETE FROM password_recoveries WHERE workspace_id=? AND user_id=?', actor.workspace_id, actor.id);
       event(actor, 'password_changed');
     });
     return createSession(actor.id);
+  }
+
+  function redeemRecovery(body) {
+    if (!validToken(body.token)) throw new Failure(422, 'Odkaz pro obnovu je neplatný.');
+    const key = hash(body.token);
+    const recovery = () => get(`SELECT r.workspace_id,r.user_id FROM password_recoveries r
+      JOIN users u ON u.workspace_id=r.workspace_id AND u.id=r.user_id
+      WHERE r.token_hash=? AND r.expires>? AND u.enabled=1`, key, Date.now());
+    if (!recovery()) throw new Failure(404, 'Odkaz pro obnovu vypršel nebo již byl použit.');
+    const digest = passwordDigest(password(body.password));
+    const userId = transaction(() => {
+      const row = recovery();
+      if (!row) throw new Failure(404, 'Odkaz pro obnovu vypršel nebo již byl použit.');
+      run('UPDATE users SET password=? WHERE workspace_id=? AND id=?', digest, row.workspace_id, row.user_id);
+      run('DELETE FROM sessions WHERE user_id=?', row.user_id);
+      run('DELETE FROM password_recoveries WHERE token_hash=?', key);
+      event({ workspace_id: row.workspace_id, id: row.user_id }, 'password_recovered');
+      return row.user_id;
+    });
+    return createSession(userId);
   }
 
   function claimInvite(body) {
@@ -162,6 +191,29 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       : 'l.*,u.name AS owner,u.role AS owner_role';
     return all('SELECT ' + fields + ' FROM leads l LEFT JOIN users u ON u.id=l.owner_id AND u.workspace_id=l.workspace_id WHERE l.workspace_id=? ' + scope + tail,
       actor.workspace_id, ...args, ...(leadId ? [leadId] : []));
+  }
+
+  function leadQueue(actor, query) {
+    allow(actor, 'admin', 'marketing', 'agent', 'care');
+    const pageSize = 30;
+    const page = query.has('page') ? id(query.get('page')) : 1;
+    const stage = query.get('stage') || '';
+    if (stage && !Object.hasOwn(stages, stage)) throw new Failure(422, 'Vyberte platný stav poptávky.');
+    const raw = query.get('q') ?? '';
+    if (raw.length > 160) throw new Failure(422, 'Hledaný text může mít nejvýše 160 znaků.');
+    const [scope, scopeArgs] = leadScope(actor);
+    const marketing = actor.role === 'marketing';
+    const search = "l.project || ' ' || l.campaign || ' ' || l.source || ' CRM-' || l.id" +
+      (marketing ? '' : " || ' ' || l.name || ' ' || l.email");
+    const predicate = `FROM leads l LEFT JOIN users u ON u.id=l.owner_id AND u.workspace_id=l.workspace_id
+      WHERE l.workspace_id=? ${scope}${stage ? ' AND l.stage=?' : ''}${raw.trim() ? ` AND instr(search_text(${search}),?)>0` : ''}`;
+    const args = [actor.workspace_id, ...scopeArgs, ...(stage ? [stage] : []), ...(raw.trim() ? [searchText(raw)] : [])];
+    const { total } = get('SELECT COUNT(*) AS total ' + predicate, ...args);
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const current = Math.min(page, pages);
+    const visible = 'l.id,l.project,l.source,l.campaign,l.stage' + (marketing ? '' : ',l.name,u.name AS owner');
+    const rows = all('SELECT ' + visible + ' ' + predicate + ' ORDER BY l.id DESC LIMIT ? OFFSET ?', ...args, pageSize, (current - 1) * pageSize);
+    return { rows, page: current, pages, total };
   }
 
   function leadDetail(actor, value) {
@@ -220,6 +272,56 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     return { invite: raw };
   }
 
+  const messageRevision = (row) => hash(JSON.stringify([row.investor_id, row.author_id, row.created_at, row.title, row.body]));
+
+  function investorMessages(actor) {
+    const investor = actor.role === 'investor';
+    const columns = investor ? 'm.id,m.title,m.body,m.published_at,m.read_at'
+      : 'm.*,u.name AS investor';
+    const filter = investor ? ' AND m.investor_id=? AND m.published_at IS NOT NULL' : '';
+    return all(`SELECT ${columns},
+      (SELECT COUNT(*) FROM investor_message_replies r WHERE r.workspace_id=m.workspace_id AND r.message_id=m.id
+        AND r.read_at IS NULL AND r.author_id ${investor ? '<>' : '='} m.investor_id) AS unread_replies
+      FROM messages m JOIN users u ON u.id=m.investor_id AND u.workspace_id=m.workspace_id
+      WHERE m.workspace_id=?${filter} ORDER BY ${investor ? 'm.published_at DESC,' : ''}m.id DESC`,
+    actor.workspace_id, ...(investor ? [actor.id] : [])).map((row) => investor || row.published_at ? row : { ...row, revision: messageRevision(row) });
+  }
+
+  function accessibleMessage(actor, value) {
+    allow(actor, 'admin', 'care', 'investor');
+    const row = get('SELECT * FROM messages WHERE workspace_id=? AND id=?', actor.workspace_id, id(value));
+    if (!row || actor.role === 'investor' && (row.investor_id !== actor.id || !row.published_at)) missing();
+    return row;
+  }
+
+  function investorThread(actor, value) {
+    const message = accessibleMessage(actor, value);
+    const investor = actor.role === 'investor';
+    return { replies: all(`SELECT r.id,r.body,r.created_at,u.name AS author,
+      r.read_at IS NULL AND r.author_id ${investor ? '<>' : '='} ? AS unread FROM investor_message_replies r
+      JOIN users u ON u.workspace_id=r.workspace_id AND u.id=r.author_id
+      WHERE r.workspace_id=? AND r.message_id=? ORDER BY r.id`, message.investor_id, actor.workspace_id, message.id) };
+  }
+
+  function readThread(actor, value, through) {
+    const row = accessibleMessage(actor, value);
+    if (!row.published_at) missing();
+    const investor = actor.role === 'investor';
+    const timestamp = now();
+    if (investor && !row.read_at) run('UPDATE messages SET read_at=? WHERE workspace_id=? AND id=?', timestamp, actor.workspace_id, row.id);
+    if (through !== undefined) run(`UPDATE investor_message_replies SET read_at=? WHERE workspace_id=? AND message_id=?
+      AND id<=? AND read_at IS NULL AND author_id ${investor ? '<>' : '='} ?`, timestamp, actor.workspace_id, row.id, id(through), row.investor_id);
+  }
+
+  function editableMessage(actor, body) {
+    allow(actor, 'admin', 'care');
+    const row = accessibleMessage(actor, body.id);
+    if (row.published_at || messageRevision(row) !== body.revision) {
+      throw new Failure(409, 'Koncept se mezitím změnil nebo byl zveřejněn. Obnovte seznam.');
+    }
+    return row;
+  }
+
   function state(actor) {
     const { workspace_id: org, id: userId, role } = actor;
     const base = { user: publicActor(actor), csrf: actor.csrf };
@@ -227,7 +329,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     if (role === 'investor') return {
       ...base,
       positions: all('SELECT id,project,principal_cents,maturity,status FROM positions WHERE workspace_id=? AND investor_id=? ORDER BY maturity', org, userId),
-      messages: all('SELECT id,title,body,published_at,read_at FROM messages WHERE workspace_id=? AND investor_id=? AND published_at IS NOT NULL ORDER BY published_at DESC,id DESC', org, userId),
+      messages: investorMessages(actor),
     };
     const leads = leadRows(actor);
     const [scope, args] = leadScope(actor);
@@ -250,13 +352,17 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       result.handoffAssigned = assigned;
       result.investors = all("SELECT id,name,email FROM users WHERE workspace_id=? AND role='investor' AND enabled=1 ORDER BY name", org);
       result.positions = all('SELECT p.*,u.name AS investor FROM positions p JOIN users u ON u.id=p.investor_id WHERE p.workspace_id=? ORDER BY p.id DESC LIMIT 500', org);
-      result.messages = all('SELECT m.*,u.name AS investor FROM messages m JOIN users u ON u.id=m.investor_id WHERE m.workspace_id=? ORDER BY m.id DESC LIMIT 500', org);
+      result.messages = investorMessages(actor);
     }
     if (role === 'admin') {
       result.users = all(`SELECT u.id,u.name,u.email,u.role,u.enabled,c.name AS client FROM users u
         LEFT JOIN client_users m ON m.workspace_id=u.workspace_id AND m.user_id=u.id
         LEFT JOIN clients c ON c.workspace_id=m.workspace_id AND c.id=m.client_id
         WHERE u.workspace_id=? ORDER BY u.enabled DESC,u.name`, org);
+      result.invitations = all(`SELECT substr(i.token_hash,1,24) AS id,i.email,i.role,i.expires,c.name AS client
+        FROM invitations i LEFT JOIN client_invitations m ON m.workspace_id=i.workspace_id AND m.token_hash=i.token_hash
+        LEFT JOIN clients c ON c.workspace_id=m.workspace_id AND c.id=m.client_id
+        WHERE i.workspace_id=? AND i.used=0 AND i.expires>? ORDER BY i.expires DESC`, org, Date.now());
       result.activity = all('SELECT a.action,a.detail,a.lead_id,a.created_at,u.name AS actor FROM activity a JOIN users u ON u.id=a.actor_id WHERE a.workspace_id=? ORDER BY a.id DESC LIMIT 100', org);
     }
     return result;
@@ -290,6 +396,19 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
         ON CONFLICT(workspace_id,lead_id) DO UPDATE SET campaign_id=excluded.campaign_id`, actor.workspace_id, lead.id, campaign.id);
       event(actor, 'campaign_attached', campaign.name + ' · ' + campaign.code, lead.id);
     },
+    'edit-lead-contact'(actor, body) {
+      allow(actor, 'admin', 'agent', 'care');
+      const lead = ownedLead(actor, body.id);
+      if (lead.stage === 'closed') throw new Failure(409, 'Uzavřená poptávka je v historii.');
+      const name = text(body.name, 'Jméno', 120);
+      const address = email(body.email);
+      if (lead.investor_id && address !== lead.email) {
+        throw new Failure(409, 'Poptávka už má propojený účet investora. E-mail jeho účtu zůstává svázaný s předáním.');
+      }
+      updateLead(actor, lead, body.version, 'name=?,email=?', name, address);
+      if (address !== lead.email) run('DELETE FROM invitations WHERE workspace_id=? AND lead_id=? AND used=0', actor.workspace_id, lead.id);
+      event(actor, 'lead_contact_updated', '', lead.id);
+    },
     'assign'(actor, body) {
       allow(actor, 'admin', 'agent', 'care');
       const row = leadRows(actor, id(body.id))[0];
@@ -309,12 +428,17 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       const allowed = actor.role === 'admin' ? (transitions.agent[row.stage] || transitions.care[row.stage] || []) : (transitions[actor.role][row.stage] || []);
       if (!allowed.includes(body.stage)) throw new Failure(409, 'Tato změna stavu v aktuální fázi není dostupná.');
       if (body.stage === 'handed' && row.owner_role !== 'care') throw new Failure(409, 'Před předáním přiřaďte odpovědného člověka z péče.');
+      const reason = body.stage === 'closed' && body.reason != null ? closeReasons[body.reason] : null;
+      if (body.stage === 'closed' && body.reason != null && !Object.hasOwn(closeReasons, body.reason)) {
+        throw new Failure(422, 'Vyberte důvod uzavření.');
+      }
       const handedAt = body.stage === 'handed' ? now() : row.handed_at;
       updateLead(actor, row, body.version, 'stage=?, handed_at=?', body.stage, handedAt);
       if (body.stage === 'handed') {
         run('UPDATE client_leads SET handed_day=? WHERE workspace_id=? AND lead_id=?', reportDay(new Date(handedAt)), actor.workspace_id, row.id);
       }
-      event(actor, 'stage_changed', stages[row.stage] + ' → ' + stages[body.stage], row.id);
+      if (body.stage === 'closed') run('DELETE FROM invitations WHERE workspace_id=? AND lead_id=? AND used=0', actor.workspace_id, row.id);
+      event(actor, 'stage_changed', stages[row.stage] + ' → ' + stages[body.stage] + (reason ? ' · ' + reason : ''), row.id);
     },
     'add-note'(actor, body) {
       allow(actor, 'admin', 'agent', 'care');
@@ -350,6 +474,27 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       run('UPDATE tasks SET done_at=? WHERE workspace_id=? AND id=?', now(), actor.workspace_id, row.id);
       event(actor, 'task_done', '', row.lead_id);
     },
+    'reopen-task'(actor, body) {
+      allow(actor, 'admin', 'agent', 'care');
+      const row = get('SELECT id,lead_id,done_at FROM tasks WHERE workspace_id=? AND id=? AND (?=1 OR owner_id=?)',
+        actor.workspace_id, id(body.id), Number(actor.role === 'admin'), actor.id);
+      if (!row) missing();
+      if (!row.done_at) return;
+      run('UPDATE tasks SET done_at=NULL WHERE workspace_id=? AND id=?', actor.workspace_id, row.id);
+      event(actor, 'task_reopened', '', row.lead_id);
+    },
+    'edit-task'(actor, body) {
+      allow(actor, 'admin', 'agent', 'care');
+      const row = get('SELECT id,lead_id,title,due,done_at FROM tasks WHERE workspace_id=? AND id=? AND (?=1 OR owner_id=?)',
+        actor.workspace_id, id(body.id), Number(actor.role === 'admin'), actor.id);
+      if (!row) missing();
+      if (row.done_at || row.title !== body.previousTitle || row.due !== body.previousDue) {
+        throw new Failure(409, 'Úkol se mezitím změnil. Obnovte přehled.');
+      }
+      run('UPDATE tasks SET title=?,due=? WHERE workspace_id=? AND id=?',
+        text(body.title, 'Úkol', 160), day(body.due), actor.workspace_id, row.id);
+      event(actor, 'task_updated', '', row.lead_id);
+    },
     'invite'(actor, body) {
       allow(actor, 'admin');
       const address = email(body.email);
@@ -357,6 +502,23 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       if (get('SELECT id FROM users WHERE workspace_id=? AND email=?', actor.workspace_id, address)) throw new Failure(409, 'Tento e-mail již má účet.');
       const client = body.role === 'client' ? clients.requireClient(actor, body.client).id : null;
       return makeInvite(actor, address, body.role, null, client);
+    },
+    'revoke-invitation'(actor, body) {
+      allow(actor, 'admin');
+      if (typeof body.id !== 'string' || !/^[a-f0-9]{24}$/.test(body.id)) throw new Failure(422, 'Neplatná pozvánka.');
+      const saved = run('DELETE FROM invitations WHERE workspace_id=? AND used=0 AND substr(token_hash,1,24)=?', actor.workspace_id, body.id);
+      if (!saved.changes) missing();
+      event(actor, 'invite_revoked');
+    },
+    'issue-password-recovery'(actor, body) {
+      allow(actor, 'admin');
+      const target = member(actor, body.id, ...roles);
+      const raw = token();
+      run(`INSERT INTO password_recoveries (workspace_id,user_id,token_hash,expires) VALUES (?,?,?,?)
+        ON CONFLICT(workspace_id,user_id) DO UPDATE SET token_hash=excluded.token_hash,expires=excluded.expires`,
+      actor.workspace_id, target.id, hash(raw), Date.now() + 30 * 60_000);
+      event(actor, 'password_recovery_issued', 'ID ' + target.id);
+      return { recovery: raw };
     },
     'link-investor'(actor, body) {
       allow(actor, 'admin', 'care');
@@ -383,7 +545,9 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       run('UPDATE users SET enabled=? WHERE workspace_id=? AND id=?', Number(body.enabled), actor.workspace_id, row.id);
       if (!body.enabled) {
         run('DELETE FROM sessions WHERE user_id=?', row.id);
+        run('DELETE FROM password_recoveries WHERE workspace_id=? AND user_id=?', actor.workspace_id, row.id);
         run("UPDATE leads SET owner_id=NULL,version=version+1 WHERE workspace_id=? AND owner_id=? AND stage<>'closed'", actor.workspace_id, row.id);
+        run('UPDATE tasks SET owner_id=? WHERE workspace_id=? AND owner_id=? AND done_at IS NULL', actor.id, actor.workspace_id, row.id);
         feedback.releaseMemberClaims(actor, row.id);
       }
       event(actor, body.enabled ? 'user_activated' : 'user_disabled', 'ID ' + row.id);
@@ -411,22 +575,55 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       event(actor, 'message_drafted', 'ID ' + message.lastInsertRowid);
       return { id: message.lastInsertRowid };
     },
+    'edit-message-draft'(actor, body) {
+      const row = editableMessage(actor, body);
+      const investor = member(actor, body.investor, 'investor');
+      run('UPDATE messages SET investor_id=?,title=?,body=? WHERE workspace_id=? AND id=?',
+        investor.id, text(body.title, 'Předmět', 160), text(body.body, 'Zpráva', 6000), actor.workspace_id, row.id);
+      event(actor, 'message_draft_updated', 'ID ' + row.id);
+    },
+    'discard-message-draft'(actor, body) {
+      const row = editableMessage(actor, body);
+      run('DELETE FROM messages WHERE workspace_id=? AND id=?', actor.workspace_id, row.id);
+      event(actor, 'message_draft_discarded', 'ID ' + row.id);
+    },
     'publish-message'(actor, body) {
       allow(actor, 'admin', 'care');
-      const row = get('SELECT id,investor_id,published_at FROM messages WHERE workspace_id=? AND id=?', actor.workspace_id, id(body.id));
-      if (!row) missing();
+      const row = accessibleMessage(actor, body.id);
       if (row.published_at) return;
+      if (body.revision !== undefined && body.revision !== messageRevision(row)) {
+        throw new Failure(409, 'Koncept se mezitím změnil. Obnovte seznam.');
+      }
       member(actor, row.investor_id, 'investor');
       run('UPDATE messages SET published_at=? WHERE workspace_id=? AND id=?', now(), actor.workspace_id, row.id);
       event(actor, 'message_published', 'ID ' + row.id);
     },
     'read-message'(actor, body) {
       allow(actor, 'investor');
-      const row = get('SELECT id,read_at FROM messages WHERE workspace_id=? AND investor_id=? AND id=? AND published_at IS NOT NULL',
-        actor.workspace_id, actor.id, id(body.id));
-      if (!row) missing();
-      if (row.read_at) return;
-      run('UPDATE messages SET read_at=? WHERE workspace_id=? AND investor_id=? AND id=?', now(), actor.workspace_id, actor.id, row.id);
+      readThread(actor, body.id);
+    },
+    'read-investor-thread'(actor, body) {
+      readThread(actor, body.id, body.through);
+    },
+    'reply-investor-message'(actor, body) {
+      const row = accessibleMessage(actor, body.id);
+      if (!row.published_at) missing();
+      const reply = text(body.reply, 'Odpověď', 4000);
+      if (typeof body.request_key !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(body.request_key)) {
+        throw new Failure(422, 'Obnovte formulář odpovědi.');
+      }
+      const prior = get(`SELECT id,author_id,body FROM investor_message_replies
+        WHERE workspace_id=? AND message_id=? AND request_key=?`, actor.workspace_id, row.id, body.request_key);
+      if (prior) {
+        if (prior.body === reply && prior.author_id === actor.id) return { id: prior.id };
+        throw new Failure(409, 'Tato odpověď už byla uložena s jinými údaji.');
+      }
+      member(actor, row.investor_id, 'investor');
+      const { lastInsertRowid } = run(`INSERT INTO investor_message_replies
+        (workspace_id,message_id,author_id,request_key,body,created_at) VALUES (?,?,?,?,?,?)`,
+      actor.workspace_id, row.id, actor.id, body.request_key, reply, now());
+      event(actor, 'investor_reply_added', 'ID ' + row.id);
+      return { id: lastInsertRowid };
     },
   };
 
@@ -451,13 +648,27 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     const rows = all('SELECT id,created_at,source,campaign,stage,handed_at FROM leads WHERE workspace_id=? ORDER BY id', actor.workspace_id);
     return csv([
       ['lead_id', 'created_date', 'source', 'campaign_id', 'status', 'handed_off_date'],
-      ...rows.map((row) => ['CRM-' + row.id, row.created_at.slice(0, 10), row.source, row.campaign,
-        row.handed_at ? stages.qualified : stages[row.stage], row.handed_at?.slice(0, 10)]),
+      ...rows.map((row) => ['CRM-' + row.id, reportDay(new Date(row.created_at)), row.source, row.campaign,
+        row.handed_at ? stages.qualified : stages[row.stage], row.handed_at ? reportDay(new Date(row.handed_at)) : null]),
     ]);
   }
 
-  return { upgraded, bootstrap, signIn, signOut, session, changePassword, claimInvite, state, leadDetail, command,
-    exportLeads, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'),
+  function exportPortfolio(actor) {
+    allow(actor, 'investor');
+    const rows = all('SELECT project,principal_cents,maturity,status FROM positions WHERE workspace_id=? AND investor_id=? ORDER BY maturity,id',
+      actor.workspace_id, actor.id);
+    return csv([['projekt', 'kapital_czk', 'splatnost', 'stav'], ...rows.map((row) => [
+      row.project, (row.principal_cents / 100).toFixed(2).replace('.', ','), row.maturity, row.status === 'active' ? 'Aktivní' : 'Splacená',
+    ])]);
+  }
+
+  return { upgraded, bootstrap, signIn, signOut, session, changePassword, claimInvite, redeemRecovery, state, leadDetail, command,
+    ready: () => { get('SELECT id FROM workspaces LIMIT 1'); return true; },
+    leadQueue: (...args) => transaction(() => leadQueue(...args), 'BEGIN'),
+    investorThread: (...args) => transaction(() => investorThread(...args), 'BEGIN'),
+    monthlyReports: (...args) => transaction(() => clients.monthlyReports(...args), 'BEGIN'),
+    monthlyReport: clients.monthlyReport,
+    exportLeads, exportPortfolio, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'),
     handoffInbox: (...args) => transaction(() => feedback.inbox(...args), 'BEGIN'),
     handoffDetail: (...args) => transaction(() => feedback.details(...args), 'BEGIN'),
     handoffAttention: (...args) => transaction(() => feedback.attention(...args), 'BEGIN'),

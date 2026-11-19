@@ -70,6 +70,7 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
   async function handler(req, res) {
     const { pathname, searchParams } = new URL(req.url, origin);
     if (req.method === 'GET' && pathname === '/health') return json(res, 200, { ok: true });
+    if (req.method === 'GET' && pathname === '/ready') return json(res, 200, { ok: store.ready() });
     if (req.method === 'GET' && Object.hasOwn(assets, pathname)) {
       const [file, mime] = assets[pathname];
       return send(res, 200, await readFile(resolve(base, 'public', file)), { 'Content-Type': mime, 'Content-Security-Policy': policy });
@@ -82,13 +83,14 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
     const raw = req.headers.cookie?.split(';').map((entry) => entry.trim()).find((entry) => entry.startsWith(cookie + '='))?.slice(cookie.length + 1);
     if (req.method === 'POST') {
       if (req.headers.origin !== origin) throw new Failure(403, 'Požadavek musí přijít z otevřené aplikace.');
-      if (pathname === '/api/login' || pathname === '/api/invite/accept' || pathname === '/api/example/session') {
+      if (['/api/login', '/api/invite/accept', '/api/password/reset', '/api/example/session'].includes(pathname)) {
         limit(req, res);
         if (pathname.endsWith('example/session') && !profiles) throw new Failure(404, 'Cesta nebyla nalezena.');
         const body = await readJson(req);
         let next;
         if (pathname === '/api/login') next = store.signIn(body);
         else if (pathname === '/api/invite/accept') next = store.claimInvite(body);
+        else if (pathname === '/api/password/reset') next = store.redeemRecovery(body);
         else {
           const profile = typeof body.role === 'string' && Object.hasOwn(profiles, body.role) ? profiles[body.role] : null;
           if (!profile) throw new Failure(404, 'Profil nebyl nalezen.');
@@ -103,6 +105,15 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
 
     if (req.method === 'GET') {
       if (pathname === '/api/state') return json(res, 200, store.state(actor));
+      if (pathname === '/api/leads') return json(res, 200, store.leadQueue(actor, searchParams));
+      if (pathname === '/api/monthly-reports') return json(res, 200, store.monthlyReports(actor, searchParams));
+      const monthly = /^\/api\/monthly-reports\/(\d+)(\.csv)?$/.exec(pathname);
+      if (monthly?.[2]) return send(res, 200, store.monthlyReport(actor, monthly[1], true), {
+        'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="mesicni-uzaverka.csv"',
+      });
+      if (monthly) return json(res, 200, store.monthlyReport(actor, monthly[1]));
+      const thread = /^\/api\/investor-messages\/(\d+)$/.exec(pathname);
+      if (thread) return json(res, 200, store.investorThread(actor, thread[1]));
       if (pathname === '/api/handoffs') return json(res, 200, store.handoffInbox(actor, searchParams));
       if (pathname === '/api/handoff-attention') return json(res, 200, store.handoffAttention(actor, searchParams));
       if (pathname === '/api/handoff-attention/count') return json(res, 200, store.handoffAttentionCounts(actor));
@@ -116,6 +127,9 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
       if (lead) return json(res, 200, store.leadDetail(actor, lead[1]));
       if (pathname === '/api/export/leads.csv') return send(res, 200, store.exportLeads(actor), {
         'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="poptavky.csv"',
+      });
+      if (pathname === '/api/export/portfolio.csv') return send(res, 200, store.exportPortfolio(actor), {
+        'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="portfolio.csv"',
       });
       if (Object.hasOwn(tools, pathname)) {
         if (!['admin', 'marketing'].includes(actor.role)) throw new Failure(403, 'K nástroji nemáte přístup.');

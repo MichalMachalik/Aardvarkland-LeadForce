@@ -33,8 +33,8 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
     store.signOut(session);
     return sessionResult(next);
   }
-  if (method === 'POST' && ['/api/login', '/api/invite/accept'].includes(path)) {
-    const next = path === '/api/login' ? store.signIn(body) : store.claimInvite(body);
+  if (method === 'POST' && ['/api/login', '/api/invite/accept', '/api/password/reset'].includes(path)) {
+    const next = path === '/api/login' ? store.signIn(body) : path === '/api/password/reset' ? store.redeemRecovery(body) : store.claimInvite(body);
     store.signOut(session);
     return sessionResult(next);
   }
@@ -43,6 +43,13 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
   if (!actor) throw new Failure(401, 'Přihlaste se do pracovního prostoru.');
   if (method === 'GET') {
     if (path === '/api/state') return result(store.state(actor));
+    if (path === '/api/leads') return result(store.leadQueue(actor, searchParams));
+    if (path === '/api/monthly-reports') return result(store.monthlyReports(actor, searchParams));
+    const monthly = /^\/api\/monthly-reports\/(\d+)(\.csv)?$/.exec(path);
+    if (monthly?.[2]) return { ...result(store.monthlyReport(actor, monthly[1], true)), contentType: 'text/csv; charset=utf-8' };
+    if (monthly) return result(store.monthlyReport(actor, monthly[1]));
+    const thread = /^\/api\/investor-messages\/(\d+)$/.exec(path);
+    if (thread) return result(store.investorThread(actor, thread[1]));
     if (path === '/api/handoffs') return result(store.handoffInbox(actor, searchParams));
     if (path === '/api/handoff-attention') return result(store.handoffAttention(actor, searchParams));
     if (path === '/api/handoff-attention/count') return result(store.handoffAttentionCounts(actor));
@@ -51,6 +58,7 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
     if (path === '/api/client/report') return result(store.clientReport(actor, searchParams));
     if (path === '/api/client/report.csv') return { ...result(store.clientReport(actor, searchParams, true)), contentType: 'text/csv; charset=utf-8' };
     if (path === '/api/export/leads.csv') return { ...result(store.exportLeads(actor)), contentType: 'text/csv; charset=utf-8' };
+    if (path === '/api/export/portfolio.csv') return { ...result(store.exportPortfolio(actor)), contentType: 'text/csv; charset=utf-8' };
     const lead = /^\/api\/leads\/(\d+)$/.exec(path);
     if (lead) return result(store.leadDetail(actor, lead[1]));
   }

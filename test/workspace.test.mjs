@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import initSqlJs from 'sql.js';
+import { backupDatabase } from '../backup.mjs';
 import { reportDay } from '../client-accounts.mjs';
 import { sqliteConnection } from '../online/sqlite.mjs';
 import * as credentials from '../security.mjs';
@@ -146,8 +147,14 @@ test('real API isolates roles and organisations through the entire handoff', asy
     const { id: message } = await change(care, 'draft-message', { investor: investor.user.id, title: 'Průběžný výkaz', body: 'První fáze projektu byla zahájena.' });
     assert.equal((await state(investor)).messages.length, 0);
     await change(investor, 'read-message', { id: message }, 404);
+    const draft = (await state(care)).messages[0];
+    const edit = { id: message, investor: investor.user.id, title: 'Aktualizovaný výkaz', body: 'První fáze projektu byla zahájena.', revision: draft.revision };
+    await change(investor, 'edit-message-draft', edit, 403);
+    await change(care, 'edit-message-draft', edit);
+    await change(care, 'publish-message', { id: message, revision: draft.revision }, 409);
+    await change(care, 'publish-message', { id: message, revision: (await state(care)).messages[0].revision });
     await change(care, 'publish-message', { id: message });
-    await change(care, 'publish-message', { id: message });
+    await change(care, 'discard-message-draft', { id: message, revision: draft.revision }, 409);
     const investorData = await state(investor);
     assert.equal(investorData.positions.length, 1);
     assert.equal(investorData.positions[0].principal_cents, 125045);
@@ -157,6 +164,24 @@ test('real API isolates roles and organisations through the entire handoff', asy
     await change(other, 'read-message', { id: message }, 404);
     await change(investor, 'read-message', { id: message });
     assert.ok((await state(care)).messages[0].read_at);
+    const thread = '/api/investor-messages/' + message;
+    await request(thread, { ...other, want: 404 });
+    await request(thread, { ...marketing, want: 403 });
+    const reply = { id: message, request_key: randomUUID(), reply: 'Prosím o aktuální termín.' };
+    const posted = await change(investor, 'reply-investor-message', reply);
+    assert.deepEqual(await change(investor, 'reply-investor-message', reply), posted);
+    await change(other, 'reply-investor-message', reply, 404);
+    await change(investor, 'reply-investor-message', { ...reply, reply: 'Přepsaný obsah' }, 409);
+    assert.equal((await state(care)).messages[0].unread_replies, 1);
+    await change(care, 'read-investor-thread', { id: message, through: posted.id });
+    assert.equal((await state(care)).messages[0].unread_replies, 0);
+    await change(care, 'reply-investor-message', { id: message, request_key: randomUUID(), reply: 'Aktualizace bude v pátek.' });
+    assert.equal((await state(investor)).messages[0].unread_replies, 1);
+    assert.deepEqual((await request(thread, investor)).data.replies.map(({ body }) => body), [reply.reply, 'Aktualizace bude v pátek.']);
+    const portfolio = (await request('/api/export/portfolio.csv', investor)).data;
+    assert.match(portfolio, /"Javor";"1250,45";"2028-08-01";"Aktivní"/);
+    assert.doesNotMatch(portfolio, /Dub|@/);
+    await request('/api/export/portfolio.csv', { ...marketing, want: 403 });
     await request('/tools/audit-kampani/index.html', { ...investor, want: 403 });
 
     await change(manager, 'user-status', { id: investor.user.id, enabled: false });
@@ -277,6 +302,30 @@ test('client report counts scoped handoffs and exact campaign costs, including c
     assert.equal(paginated.pages, 2);
     assert.equal(paginated.page, 2);
     assert.equal(paginated.deliveries.length, 2);
+    const past = '2020-06';
+    const statements = (actor, query = '', want = 200) => request('/api/monthly-reports' + query, { ...actor, want });
+    const query = '?' + new URLSearchParams({ client: a, month: past });
+    await statements(care, query, 403);
+    assert.deepEqual((await statements(clientA, query)).data, { rows: [] });
+    const preview = (await statements(marketing, query)).data;
+    const publish = { client: a, month: past, revision: 0, preview: preview.previewKey };
+    await change(marketing, 'publish-monthly-report', publish, 403);
+    await change(admin, 'publish-monthly-report', publish, 409);
+    await change(admin, 'publish-monthly-report', { ...publish, month: today.slice(0, 7) }, 422);
+    await cost(main, past + '-01', '450');
+    await change(admin, 'publish-monthly-report', publish, 409);
+    publish.preview = (await statements(admin, query)).data.previewKey;
+    const firstVersion = await change(admin, 'publish-monthly-report', publish);
+    assert.deepEqual(await change(admin, 'publish-monthly-report', publish), firstVersion);
+    assert.deepEqual((await statements(clientA)).data.rows.map(({ revision }) => revision), [1]);
+    await request('/api/monthly-reports/' + firstVersion.id, { ...clientB, want: 404 });
+    await request('/api/monthly-reports/' + firstVersion.id + '.csv', { ...clientC, want: 404 });
+    await cost(main, past + '-01', '500');
+    const currentKey = (await statements(admin, query)).data.previewKey;
+    await change(admin, 'publish-monthly-report', { ...publish, revision: 1, preview: currentKey }, 422);
+    await change(admin, 'publish-monthly-report', { ...publish, revision: 1, preview: currentKey, note: 'Oprava výdaje.' });
+    assert.deepEqual((await statements(clientA)).data.rows.map(({ revision }) => revision), [2, 1]);
+    assert.match((await request('/api/monthly-reports/' + firstVersion.id + '.csv', clientA)).data, /"450,00"/);
     assert.deepEqual(loggedErrors, []);
   } finally {
     await close();
@@ -572,6 +621,83 @@ test('existing Node and browser databases keep their sessions, invitations and l
   }
 });
 
+test('CRM search covers the full queue and preserves scope while staff repair contacts, close leads and manage tasks', async () => {
+  const { store, request, session, state, detail, change, invite, close, loggedErrors } = await openApi();
+  try {
+    store.bootstrap(alpha);
+    const admin = await session(await request('/api/login', { body: alpha }));
+    const marketing = await invite(admin, 'Kampane', 'marketing');
+    const agent = await invite(admin, 'Zpracovatel', 'agent');
+    const second = await invite(admin, 'Zastup', 'agent');
+    const actor = store.session(admin.cookie.slice('workspace='.length));
+    const older = store.command(actor, 'create-lead', {
+      name: 'Šárka Původní', email: 'oprava@a.example', project: 'Jedinečný projekt', source: 'Sklik', campaign: 'O-1',
+    }).id;
+    for (let i = 0; i < 505; i++) store.command(actor, 'create-lead', {
+      name: 'Fronta ' + i, email: 'fronta-' + i + '@a.example', project: 'Pilot', source: 'Meta', campaign: 'P-1',
+    });
+    const queue = async (who, query) => (await request('/api/leads?' + new URLSearchParams(query), who)).data;
+    assert.equal((await queue(marketing, {})).pages, 17);
+    assert.equal((await queue(agent, { q: 'sarka puvodni' })).rows[0].id, older);
+    assert.deepEqual((await queue(marketing, { q: 'sarka puvodni' })).rows, []);
+    assert.equal((await queue(marketing, { q: 'jedinecny' })).rows[0].name, undefined);
+    assert.equal((await queue(marketing, { page: 99 })).rows.at(-1).id, older);
+    await change(agent, 'edit-lead-contact', { id: older, version: 1, name: 'Šárka', email: 'novy@a.example' }, 403);
+    await change(agent, 'assign', { id: older, version: 1 });
+    assert.deepEqual((await queue(second, { q: 'jedinecny' })).rows, []);
+    const update = { id: older, version: 2, name: 'Šárka Opravená', email: 'novy@a.example' };
+    await change(agent, 'edit-lead-contact', update);
+    await change(agent, 'edit-lead-contact', update, 409);
+    assert.equal((await detail(agent, older)).lead.email, update.email);
+    await change(agent, 'add-task', { id: older, title: 'Zavolat', due: '2029-08-12' });
+    const task = (await state(agent)).tasks[0];
+    const edit = { id: task.id, title: 'Ověřit termín', due: '2029-08-13', previousTitle: task.title, previousDue: task.due };
+    await change(second, 'edit-task', edit, 404);
+    await change(agent, 'edit-task', edit);
+    await change(agent, 'edit-task', edit, 409);
+    await change(agent, 'complete-task', { id: task.id });
+    await change(agent, 'reopen-task', { id: task.id });
+    assert.equal((await state(agent)).tasks[0].done_at, null);
+    await change(agent, 'change-stage', { id: older, version: 3, stage: 'closed', reason: 'declined' });
+    assert.match((await detail(agent, older)).activity[0].detail, /Bez zájmu/);
+    await change(admin, 'user-status', { id: agent.user.id, enabled: false });
+    assert.equal((await state(admin)).tasks[0].owner_id, admin.user.id);
+    assert.deepEqual(loggedErrors, []);
+  } finally { await close(); }
+});
+
+test('pending invitations can be revoked and recovery links are scoped, replaced and single-use', async () => {
+  const { store, request, session, state, change, invite, close, loggedErrors } = await openApi();
+  try {
+    store.bootstrap(alpha);
+    store.bootstrap(beta);
+    const admin = await session(await request('/api/login', { body: alpha }));
+    const outsider = await session(await request('/api/login', { body: beta }));
+    const user = await invite(admin, 'Podpora', 'care');
+    const pending = await change(admin, 'invite', { email: 'cekam@a.example', role: 'agent' });
+    const [invitation] = (await state(admin)).invitations;
+    assert.equal(invitation.email, 'cekam@a.example');
+    assert.doesNotMatch(JSON.stringify(invitation), new RegExp(pending.invite));
+    await change(outsider, 'revoke-invitation', { id: invitation.id }, 404);
+    await change(admin, 'revoke-invitation', { id: invitation.id });
+    await request('/api/invite/accept', { body: { token: pending.invite, name: 'Čekající', password: secret }, want: 404 });
+    await change(user, 'issue-password-recovery', { id: admin.user.id }, 403);
+    await change(outsider, 'issue-password-recovery', { id: user.user.id }, 422);
+    const first = await change(admin, 'issue-password-recovery', { id: user.user.id });
+    const second = await change(admin, 'issue-password-recovery', { id: user.user.id });
+    const password = 'Obnovene-Fiktivni-Heslo-2026!';
+    const reset = (token, want = 200) => request('/api/password/reset', { body: { token, password }, want });
+    await reset(first.recovery, 404);
+    const renewed = await session(await reset(second.recovery));
+    await reset(second.recovery, 404);
+    await state(user, 401);
+    assert.equal(renewed.user.id, user.user.id);
+    await request('/api/login', { body: { slug: alpha.slug, email: user.user.email, password: secret }, want: 401 });
+    await request('/api/login', { body: { slug: alpha.slug, email: user.user.email, password } });
+    assert.deepEqual(loggedErrors, []);
+  } finally { await close(); }
+});
+
 test('production storage retains the real account and workflow across restart', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'workspace-qa-'));
   const db = join(folder, 'test.sqlite');
@@ -582,6 +708,14 @@ test('production storage retains the real account and workflow across restart', 
     const session = store.signIn(setup);
     const actor = store.session(session);
     store.command(actor, 'create-lead', { name: 'Kontaktní osoba', email: 'kontakt@restart.example', project: 'Restart', source: 'Meta', campaign: 'M-8' });
+    const snapshot = join(folder, 'backup.sqlite');
+    await backupDatabase(db, snapshot);
+    await assert.rejects(backupDatabase(db, snapshot), /už existuje/);
+    const restored = openStore(snapshot);
+    try {
+      const account = restored.session(restored.signIn(setup));
+      assert.equal(restored.state(account).leads[0].name, 'Kontaktní osoba');
+    } finally { restored.close(); }
     store.close();
     store = openStore(db);
     const reloaded = store.state(store.session(session));

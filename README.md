@@ -20,6 +20,10 @@ Pro ukázku používejte smyšlené údaje a e-maily s koncovkou `.example`. Poz
 4. V dalším panelu založte účet z pozvánky. Z **Péče** přidejte tomuto účtu pozici a zveřejněte koncept zprávy. V účtu investora otevřete portfolio a zprávu. Stav přečtení se objeví po obnovení přehledu na straně péče.
 5. Ve **Správě** projděte uživatele, historii organizace a upozornění. **Marketing** může stáhnout CSV pro import do Auditu. Export obsahuje identifikátor poptávky, kanál, kampaň, stav a data, jména a e-maily v něm chybí.
 
+Fronta poptávek hledá ve všech dostupných záznamech a stránkuje výsledky. Oprávněný zpracovatel může opravit kontakt, upravit nebo znovu otevřít úkol a uzavřít poptávku s důvodem. U předání zůstává původní datum pro report. U úkolů deaktivovaného pracovníka přebírá otevřenou práci správce. Historie zapisuje provedené změny.
+
+Investor v **Portfoliu** stáhne přehled svých pozic jako CSV. Ve **Zprávách** může odpovědět do vlákna. Péče může koncept upravit, zahodit nebo zveřejnit a v publikovaném vlákně odpovědět. Stav přečtení a počet nových odpovědí se aktualizují po otevření vlákna.
+
 ### Průchod klientským reportem
 
 1. V roli **Klient** otevřete přehled fiktivního Lípového bydlení. Vyberte kampaň **Byty pod Lípou**. Čerstvé výchozí demo ukazuje 1 890 Kč, dvě předání a 945 Kč za předání.
@@ -30,6 +34,12 @@ Pro ukázku používejte smyšlené údaje a e-maily s koncovkou `.example`. Poz
 Report počítá evidovaný výdaj v Kč dělený počtem skutečných předání ve stejném období. Oba konce období jsou zahrnuté a den předání odpovídá časovému pásmu Praha. Kampaň bez výdajů v evidenci se zobrazí jako **Bez evidence**. Zadaná nula je platný náklad. Pokud u kampaně s předáním výdaj chybí, souhrnný náklad na předání se nevyčíslí. U výdajů doplněných jen zčásti report ukazuje evidovaný součet. Uzavření dříve předané poptávky zachová historické předání.
 
 Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí roli **Klient** a konkrétního klienta. Všichni pozvaní uživatelé tohoto klienta uvidí stejný přehled. Výběr kampaně ani export nezpřístupňuje záznamy jiného klienta.
+
+### Měsíční uzávěrky
+
+Marketing a správce v **Měsíčních uzávěrkách** načtou podklady za vybraného klienta a uzavřený měsíc. Nevykázané dny Google Ads lze vyřešit importem nebo ručním doplněním nákladu pro chybějící den. Ručně ověřený náklad se použije i při výpadku zdroje, který zachoval starší částku.
+
+Správce zveřejní ověřený náhled. Při pozdější opravě nákladu načte nové podklady a zveřejní další verzi s důvodem. Klient najde v archivu starší i aktuální verze a může vyexportovat každou z nich. Archiv obsahuje souhrny kampaní bez kontaktních údajů. Čerstvé demo obsahuje jednu fiktivní uzávěrku.
 
 ### Potvrzení převzetí a reklamace
 
@@ -67,7 +77,7 @@ node setup.mjs
 npm start
 ```
 
-Nastavení se zeptá na název a identifikátor organizace, jméno a e-mail správce a heslo (nejméně 12 znaků). Otevřete [přihlášení](http://127.0.0.1:4190/) a použijte zadané údaje. Správce pozve další uživatele přes **Uživatelé**. Pozvánku lze použít jednou během 24 hodin. Odkaz se kopíruje v aplikaci a předává se mimo ni. Při prvním spuštění jsou klienti, kampaně, náklady, poptávky, pozice i zprávy prázdné. SQLite soubor se vytvoří při prvním nastavení nebo spuštění služby. U stávající instalace se při otevření databáze doplní schéma klientských účtů a zachovají se stávající záznamy.
+Nastavení se zeptá na název a identifikátor organizace, jméno a e-mail správce a heslo (nejméně 12 znaků). Otevřete [přihlášení](http://127.0.0.1:4190/) a použijte zadané údaje. Správce pozve další uživatele přes **Uživatelé**. Pozvánku lze použít jednou během 24 hodin a do přijetí ji lze zrušit. Odkaz se kopíruje v aplikaci a předává se mimo ni. Správce může vytvořit také jednorázový odkaz na obnovu hesla. Platí 30 minut a nastavení nového hesla ukončí předchozí relace. Při prvním spuštění jsou klienti, kampaně, náklady, poptávky, pozice i zprávy prázdné. SQLite soubor se vytvoří při prvním nastavení nebo spuštění služby. U stávající instalace se při otevření databáze doplní schéma a zachovají se stávající záznamy.
 
 | Nastavení | Účel |
 | --- | --- |
@@ -75,9 +85,9 @@ Nastavení se zeptá na název a identifikátor organizace, jméno a e-mail spr�
 | `WORKSPACE_PORT` | Místní port. Výchozí port čisté verze je 4190, port dema je 4191. |
 | `WORKSPACE_ORIGIN` | HTTPS adresa v případě nasazení za reverzní proxy, bez cesty nebo parametrů. Pro místní start se odvodí z portu. |
 
-Služba poslouchá pouze na `127.0.0.1`. Pro nasazení potřebuje vlastní HTTPS doménu, reverzní proxy, trvalý disk a spravovaný proces. Proxy musí předávat hlavičku `Origin` a měla by samostatně omezovat počet požadavků na přihlašovací trasy. Aplikace omezuje pokusy podle bezprostředního síťového protějšku, který je při tomto nasazení proxy. Endpoint `/health` slouží ke kontrole běžícího HTTP procesu.
+Služba poslouchá pouze na `127.0.0.1`. Pro nasazení potřebuje vlastní HTTPS doménu, reverzní proxy, trvalý disk a spravovaný proces. Proxy musí předávat hlavičku `Origin` a měla by samostatně omezovat počet požadavků na přihlašovací trasy. Aplikace omezuje pokusy podle bezprostředního síťového protějšku, který je při tomto nasazení proxy. Endpoint `/health` ověřuje běh HTTP procesu a `/ready` navíc ověřuje čtení databáze.
 
-Při zálohování po korektním zastavení služby zkopírujte databázi a případné související soubory WAL. Za běhu použijte nástroj, který zálohuje konzistentní SQLite snímek. Ověřte obnovu na odděleném serveru. Přístup k datovému adresáři, zálohám a propojeným nástrojům svěřte jen oprávněným uživatelům. Importované soubory pracují v oddělených nástrojích v prohlížeči.
+Příkaz `npm run backup -- cesta-k-nove-zaloze.sqlite` vytvoří ověřený SQLite snímek i za běhu služby. Cílová složka musí existovat a podporovat pevné odkazy. Příkaz existující cílový soubor nepřepisuje. Pro zkušební obnovu pracujte s kopií zálohy a spusťte samostatnou instanci s vlastní cestou `WORKSPACE_DATA` a jiným portem. Přístup k datovému adresáři, zálohám a propojeným nástrojům svěřte oprávněným uživatelům. Importované soubory pracují v oddělených nástrojích v prohlížeči.
 
 ### Zapnutí serverového zdroje
 
@@ -93,7 +103,7 @@ Bez zadaného období příkaz načítá posledních sedm uzavřených dnů. Vol
 
 ## Ověření
 
-Příkaz `npm test` spouští testy serverových oprávnění a obnovy stavu. `npm run demo` spustí místní serverovou ukázku s fiktivními daty na portu 4191. Sdílený průchod v prohlížeči je v `test/browser.cjs`. Vyžaduje Playwright a prohlížeč. `TEST_URL` umožňuje ověřit i veřejné sestavení, `TEST_ENGINE` vybírá `chromium`, `firefox` nebo `webkit`.
+Po `npm ci` a `npx playwright install chromium` spustí `npm run test:release` serverové testy, oba režimy aplikace v prohlížeči, všechny tři samostatné nástroje i průchod mezi nimi. Stejná kontrola předchází nasazení na GitHub Pages. Pro jednotlivý průchod slouží `test/browser.cjs`. `TEST_URL` umožňuje ověřit veřejné sestavení, `TEST_ENGINE` vybírá `chromium`, `firefox` nebo `webkit`. `npm run demo` spustí místní serverovou ukázku na portu 4191.
 
 Příkazy `npm ci` a `npm run build` vytvoří v `dist/` statický build. Prohlížeč používá stejný model a pravidla jako server v samostatném workeru se SQLite a ukládá stav do IndexedDB. Build neobsahuje žádný serverový datový soubor.
 

@@ -91,6 +91,10 @@ test('Google Ads sync is scoped, repeatable and keeps a gap separate from a conf
     invalid.campaigns[0].results.push({ ...invalid.campaigns[0].results[0], metrics: { costMicros: '980000000' } });
     assert.throws(() => store.googleAds.apply(admin, plan, invalid), { status: 502 });
     assert.equal(report().totals.cost_cents, 125000);
+    sync('gap');
+    store.command(marketing, 'save-campaign-cost', { campaign, day: gapDay, cost: '42' });
+    assert.equal(report().import_missing, 0);
+    assert.equal(report().totals.unit_cents, 49200);
   } finally {
     store.close();
   }

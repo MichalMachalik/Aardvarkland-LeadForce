@@ -129,6 +129,13 @@ export function populateClientExample(store, token, adminId, careId) {
       store.command(admin, 'save-campaign-cost', { campaign, day: reportDay(), cost });
       return campaign;
     });
+    const previous = new Date(reportDay().slice(0, 7) + '-01T00:00:00Z');
+    previous.setUTCMonth(previous.getUTCMonth() - 2);
+    const historicalDay = previous.toISOString().slice(0, 10);
+    const month = historicalDay.slice(0, 7);
+    store.command(admin, 'save-campaign-cost', { campaign: campaigns[2], day: historicalDay, cost: '1250' });
+    const past = store.monthlyReports(admin, new URLSearchParams({ client, month }));
+    store.command(admin, 'publish-monthly-report', { client, month, revision: 0, preview: past.previewKey });
     const careSession = store.createSession(careId);
     const care = store.session(careSession);
     try {
