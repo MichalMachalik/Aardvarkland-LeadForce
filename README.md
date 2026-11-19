@@ -39,7 +39,9 @@ Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí
 4. Jako **Klient** otevřete **Čeká na reakci**, vyberte případ a použijte **Doplnit podklady**. Na čerstvě otevřeném demu lze tenhle krok vyzkoušet rovnou u kontaktu **Hana Vítová**.
 5. Doplněný případ se vrátí do fronty týmu. Při potřebě dalších podkladů lze postup zopakovat. Po uložení rozhodnutí zůstává výsledek i celé vlákno v detailu. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
 
-Upozornění v aplikaci se zobrazuje klientovi u vyžádaných podkladů a týmu u nových reklamací nebo po doplnění podkladů. Počet se obnovuje při návratu na kartu a průběžně, když je karta otevřená. Obsah vlákna se načte znovu tlačítkem **Obnovit detail**.
+**Lhůty na reakci.** Tým má 24 hodin od podání reklamace nebo od doplnění podkladů klientem. Převzetí reklamace původní termín zachová. Vyžádáním podkladů přechází odpočet na klienta, který má 72 hodin na odpověď. Lhůty běží v kalendářních hodinách. Po vypršení lhůty lze stále odpovědět nebo uložit rozhodnutí.
+
+Prošlé otevřené případy se zobrazí v **Eskalacích reklamací** u správce a členů péče s přístupem k danému předání. Fronta uvádí termín i stranu, od které se čeká na reakci. Podle aktuálního termínu se počty v aplikaci obnovují při návratu na kartu a průběžně při jejím otevření. Obsah vlákna se načte znovu tlačítkem **Obnovit detail**. V čerstvém demu najde role **Péče** případ **Hana Vítová** už po lhůtě. Po odpovědi klienta se vrátí mezi běžné případy na reakci týmu s novým termínem.
 
 Potvrzení je jednorázové. U jednoho předání může tým současně řešit jednu reklamaci. Další podání po vyřízení vytvoří nový případ a starší rozhodnutí zůstává v historii. V přehledu péče jsou předání tohoto pracovníka a případy bez aktivního vlastníka. Správce vidí předání v celé organizaci. Vyjádření k reklamaci je součást klientského detailu, interní poznámky CRM zůstávají v týmové evidenci. Původní datum a počet předání pro výpočet kampaní vycházejí ze skutečně evidovaného předání.
 

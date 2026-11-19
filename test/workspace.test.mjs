@@ -19,8 +19,8 @@ const origin = 'http://127.0.0.1';
 const alpha = { slug: 'alpha', workspace: 'Organizace A', name: 'Správce A', email: 'sprava@a.example', password: secret };
 const beta = { ...alpha, slug: 'beta', workspace: 'Organizace B', name: 'Správce B' };
 
-async function openApi() {
-  const store = openStore(':memory:');
+async function openApi(options) {
+  const store = openStore(':memory:', options);
   const loggedErrors = [];
   const server = createWorkspaceServer(store, { origin, log: (error) => loggedErrors.push(error) });
   await once(server.listen(0, '127.0.0.1'), 'listening');
@@ -284,11 +284,14 @@ test('client report counts scoped handoffs and exact campaign costs, including c
 });
 
 test('handoff confirmation and complaints respect client, care and organisation scope and preserve the delivery', async () => {
-  const { store, request, session, state, change, invite, close, loggedErrors } = await openApi();
+  // The first turn spans a clock change in Prague and still lasts 24 elapsed hours.
+  let claimTime = Date.parse('2026-10-24T12:30:00.123Z');
+  const { store, request, session, state, change, invite, close, loggedErrors } = await openApi({ claimClock: () => claimTime });
   const detail = async (actor, id, want = 200) => (await request('/api/handoffs/' + id, { ...actor, want })).data;
   const inbox = async (actor, filter = '', want = 200) => (await request('/api/handoffs' + filter, { ...actor, want })).data;
   const attention = async (actor, want = 200) => (await request('/api/handoff-attention', { ...actor, want })).data;
   const attentionCount = async (actor) => (await request('/api/handoff-attention/count', actor)).data.count;
+  const escalations = async (actor, want = 200) => (await request('/api/handoff-attention?overdue=1', { ...actor, want })).data.rows;
   try {
     store.bootstrap(alpha);
     store.bootstrap(beta);
@@ -357,7 +360,11 @@ test('handoff confirmation and complaints respect client, care and organisation 
     assert.equal((await inbox(otherCare)).rows.length, 0);
     assert.equal((await state(admin)).handoffSummary.active, 1);
     assert.equal((await state(care)).handoffAttention, 1);
-    assert.equal((await attention(care)).rows[0].id, lead);
+    const incoming = (await attention(care)).rows[0];
+    assert.equal(incoming.id, lead);
+    assert.equal(incoming.sla_due_at, '2026-10-25T12:30:00.123Z');
+    assert.equal(incoming.sla_overdue, 0);
+    assert.deepEqual(await escalations(care), []);
     assert.equal(await attentionCount(viewer), 0);
     const draft = { id: filed.id, version: 1, outcome: 'accepted', resolution: 'Údaje jsme zkontrolovali.' };
     const ask = { id: filed.id, version: 2, message: 'Doplňte referenci původního záznamu.', request_key: randomUUID() };
@@ -367,9 +374,22 @@ test('handoff confirmation and complaints respect client, care and organisation 
     await change(otherAdmin, 'review-handoff-claim', draft, 404);
     await change(care, 'resolve-handoff-claim', draft, 409);
     await change(care, 'request-claim-evidence', { ...ask, version: 1 }, 409);
+    claimTime = Date.parse(incoming.sla_due_at) - 1;
     await change(care, 'review-handoff-claim', draft);
     assert.equal((await detail(viewer, lead)).claims[0].status, 'review');
-    assert.equal(await attentionCount(care), 0);
+    assert.equal(await attentionCount(care), 1);
+    assert.deepEqual(await escalations(admin), []);
+    assert.equal((await detail(viewer, lead)).delivery.sla_due_at, incoming.sla_due_at);
+    claimTime += 1;
+    assert.equal((await state(admin)).handoffEscalations, 1);
+    const late = (await escalations(care))[0];
+    assert.equal(late.id, lead);
+    assert.equal(late.sla_overdue, 1);
+    assert.deepEqual(await escalations(otherCare), []);
+    assert.deepEqual(await escalations(otherAdmin), []);
+    await escalations(marketing, 403);
+    await escalations(viewer, 403);
+    assert.equal((await request('/api/handoff-attention/count', viewer)).data.overdue, undefined);
     await change(viewer, 'request-claim-evidence', ask, 403);
     await change(otherCare, 'request-claim-evidence', ask, 404);
     await change(otherAdmin, 'request-claim-evidence', ask, 404);
@@ -380,7 +400,10 @@ test('handoff confirmation and complaints respect client, care and organisation 
     await change(care, 'request-claim-evidence', { ...ask, version: 3, request_key: randomUUID() }, 409);
     assert.equal((await state(viewer)).handoffAttention, 1);
     assert.equal(await attentionCount(care), 0);
-    assert.equal((await attention(viewer)).rows[0].claim_turn, 'request');
+    const pendingEvidence = (await attention(viewer)).rows[0];
+    assert.equal(pendingEvidence.claim_turn, 'request');
+    assert.equal(pendingEvidence.sla_due_at, '2026-10-28T12:30:00.123Z');
+    assert.deepEqual(await escalations(admin), []);
     assert.equal((await inbox(care, '?status=client_turn')).rows[0].id, lead);
     assert.deepEqual((await attention(neighbour)).rows, []);
     assert.equal(await attentionCount(outsider), 0);
@@ -389,19 +412,32 @@ test('handoff confirmation and complaints respect client, care and organisation 
     await change(care, 'reply-claim-evidence', answer, 403);
     await change({ ...viewer, csrf: undefined }, 'reply-claim-evidence', answer, 403);
     await change(viewer, 'reply-claim-evidence', { ...answer, version: 2 }, 409);
+    claimTime = Date.parse(pendingEvidence.sla_due_at) - 1;
+    assert.deepEqual(await escalations(admin), []);
+    claimTime += 1;
+    assert.equal((await request('/api/handoff-attention/count', care)).data.overdue, 1);
+    assert.equal((await escalations(admin))[0].claim_turn, 'request');
+    assert.equal((await attention(viewer)).rows[0].sla_overdue, 1);
     const supplied = await change(viewer, 'reply-claim-evidence', answer);
     assert.deepEqual(await change(viewer, 'reply-claim-evidence', answer), supplied);
     await change(viewer, 'reply-claim-evidence', { ...answer, version: 4, request_key: randomUUID() }, 409);
     assert.equal(await attentionCount(viewer), 0);
     assert.equal(await attentionCount(care), 1);
-    assert.equal((await attention(admin)).rows[0].claim_turn, 'reply');
+    const resumed = (await attention(admin)).rows[0];
+    assert.equal(resumed.claim_turn, 'reply');
+    assert.equal(resumed.sla_due_at, '2026-10-29T12:30:00.123Z');
+    assert.deepEqual(await escalations(admin), []);
     assert.deepEqual((await attention(otherCare)).rows, []);
     assert.equal((await request('/api/client/report', viewer)).data.deliveries[0].claim_turn, 'reply');
     await change(care, 'resolve-handoff-claim', draft, 409);
     await change(care, 'resolve-handoff-claim', { ...draft, version: 4, resolution: ' ' }, 422);
+    claimTime = Date.parse(resumed.sla_due_at);
+    assert.equal((await escalations(admin))[0].id, lead);
     await change(care, 'resolve-handoff-claim', { ...draft, version: 4 });
     await change(care, 'resolve-handoff-claim', { ...draft, version: 4 });
     const received = await detail(viewer, lead);
+    assert.equal(received.delivery.sla_due_at, null);
+    assert.deepEqual(await escalations(admin), []);
     assert.equal(received.claims[0].status, 'accepted');
     assert.equal(received.claims[0].resolution, draft.resolution);
     assert.equal(received.claims[0].reviewer_id, undefined);

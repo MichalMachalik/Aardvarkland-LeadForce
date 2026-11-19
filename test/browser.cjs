@@ -16,7 +16,7 @@ const set = async (page, values) => {
 async function openCase(demo, callback) {
   const { createWorkspaceServer } = await import('../server.mjs');
   const { openStore } = await import('../store.mjs');
-  const { populateExample } = await import('../demo.mjs');
+  const { createExample } = await import('../demo.mjs');
   const { exampleAdsSnapshot } = await import('../google-ads-example.mjs');
   const { token } = await import('../security.mjs');
   const probe = createServer();
@@ -24,9 +24,9 @@ async function openCase(demo, callback) {
   const port = probe.address().port;
   await new Promise((done) => probe.close(done));
   const origin = 'http://127.0.0.1:' + port;
-  const store = openStore(':memory:');
   const errors = [];
-  const profiles = demo ? populateExample(store, token) : null;
+  const { store, profiles } = demo ? createExample((options) => openStore(':memory:', options), token)
+    : { store: openStore(':memory:'), profiles: null };
   if (!demo) store.bootstrap({
     workspace: 'Prázdná organizace', slug: 'prazdna', name: 'Správce testu',
     email: 'spravce@test.example', password: 'Testovaci_heslo_2026',
@@ -393,10 +393,25 @@ async function handoffFeedback({ page }) {
   await btn(client, 'Podat reklamaci').click();
   await client.getByText('Reklamace byla podána.', { exact: true }).waitFor();
   await client.getByText('Nová reklamace', { exact: true }).waitFor();
+  await client.getByText('Termín týmu', { exact: true }).waitFor();
+  assert.equal(await client.getByText('Po lhůtě', { exact: true }).isVisible(), false);
   assert.equal(await btn(client, 'Podat reklamaci').count(), 0);
 
   const staff = await page();
   await btn(staff, /^Péče ·/).click();
+  await titled(staff, 'Přehled týmu');
+  await staff.locator('#handoff-escalations-alert').click();
+  await titled(staff, 'Eskalace reklamací');
+  const late = staff.getByRole('row', { name: /Hana Vítová/ });
+  await late.getByRole('cell', { name: 'Klient', exact: true }).waitFor();
+  await late.getByText('Po lhůtě', { exact: true }).waitFor();
+  assert.equal(await staff.getByRole('row', { name: /Zuzana Šedá/ }).count(), 0);
+  await late.getByRole('link', { name: 'Hana Vítová', exact: true }).click();
+  await titled(staff, 'Hana Vítová');
+  await staff.getByText('Termín klienta', { exact: true }).waitFor();
+  await staff.getByRole('link', { name: 'Zpět k eskalacím', exact: true }).click();
+  await titled(staff, 'Eskalace reklamací');
+  await goto(staff, 'Přehled');
   await titled(staff, 'Přehled týmu');
   await staff.getByRole('link', { name: /^Otevřené reklamace/ }).click();
   await titled(staff, 'Předání klientům');
@@ -415,6 +430,7 @@ async function handoffFeedback({ page }) {
   await btn(staff, 'Vyžádat podklady').click();
   await staff.getByText('Požadavek je ve vlákně reklamace.', { exact: true }).waitFor();
   await staff.getByText('Čeká na klienta', { exact: true }).waitFor();
+  await staff.getByText('Termín klienta', { exact: true }).waitFor();
   await focus(client);
   await client.waitForFunction(() => document.querySelector('#handoff-attention-count')?.textContent === '2');
   await client.getByRole('link', { name: 'Zpět do přehledu', exact: true }).click();
@@ -425,6 +441,7 @@ async function handoffFeedback({ page }) {
   await client.getByRole('link', { name, exact: true }).click();
   await titled(client, name);
   await client.getByText(request, { exact: true }).waitFor();
+  await client.getByText('Váš termín', { exact: true }).waitFor();
   await client.getByLabel('Doplnění podkladů', { exact: true }).fill(reply);
   await staff.getByLabel('Vyjádření pro klienta', { exact: true }).fill(outcome);
   await btn(client, 'Doplnit podklady').click();
@@ -439,6 +456,7 @@ async function handoffFeedback({ page }) {
   await staff.getByRole('link', { name, exact: true }).click();
   await titled(staff, name);
   await staff.getByText(reply, { exact: true }).waitFor();
+  await staff.getByText('Termín týmu', { exact: true }).waitFor();
   await staff.getByLabel('Výsledek reklamace', { exact: true }).selectOption('accepted');
   await staff.getByLabel('Vyjádření pro klienta', { exact: true }).fill(outcome);
   await btn(staff, 'Uložit rozhodnutí').click();
@@ -448,6 +466,7 @@ async function handoffFeedback({ page }) {
   await client.getByText('Uznaná', { exact: true }).waitFor();
   await client.getByText(outcome, { exact: true }).waitFor();
   await client.getByText(reply, { exact: true }).waitFor();
+  assert.equal(await client.getByText('Termín týmu', { exact: true }).count(), 0);
   await client.getByRole('link', { name: 'Zpět k upozorněním', exact: true }).click();
   await titled(client, 'Čeká na vaši odpověď');
   assert.equal(await client.getByRole('link', { name, exact: true }).count(), 0);
@@ -462,6 +481,18 @@ async function handoffFeedback({ page }) {
   await staff.getByLabel('Stav předání', { exact: true }).selectOption('closed');
   await btn(staff, 'Použít filtr').click();
   await row.getByText('Uznaná', { exact: true }).waitFor();
+
+  await client.getByRole('link', { name: 'Hana Vítová', exact: true }).click();
+  await titled(client, 'Hana Vítová');
+  await client.getByText('Po lhůtě', { exact: true }).waitFor();
+  await client.getByLabel('Doplnění podkladů', { exact: true }).fill('Dodatečně doplňuji referenci TEST-56.');
+  await btn(client, 'Doplnit podklady').click();
+  await client.getByText('Podklady byly doplněny.', { exact: true }).waitFor();
+  await focus(staff);
+  await staff.locator('#handoff-escalations-count').waitFor({ state: 'hidden' });
+  await goto(staff, 'Eskalace reklamací');
+  await titled(staff, 'Eskalace reklamací');
+  await staff.getByText('Žádná otevřená reklamace není po lhůtě.', { exact: true }).waitFor();
 }
 
 const demoWorkflows = async (context) => {
@@ -474,5 +505,5 @@ const check = process.env.TEST_URL
   ? exerciseBrowser(process.env.TEST_URL, [], process.env.FEEDBACK_ONLY ? handoffFeedback : published, true)
   : openCase(true, demoWorkflows).then(() => openCase(false, blank));
 check.then(() => {
-  console.log('PASS browser delivery confirmation, evidence thread and client/team response alerts');
+  console.log('PASS browser claim thread, response deadlines and team escalation');
 }).catch((error) => { console.error(error); process.exitCode = 1; });

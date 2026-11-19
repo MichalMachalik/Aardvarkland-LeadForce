@@ -1,7 +1,15 @@
 import { reportDay } from './client-accounts.mjs';
 import { prepareExampleBinding } from './google-ads-example.mjs';
 
-export function populateExample(store, token) {
+export function createExample(open, token) {
+  let seeding = true;
+  const store = open({ claimClock: () => Date.now() - (seeding ? 73 * 60 * 60 * 1000 : 0) });
+  try {
+    return { store, profiles: populateExample(store, token) };
+  } finally { seeding = false; }
+}
+
+function populateExample(store, token) {
   const setup = store.bootstrap({
     slug: 'javorova', workspace: 'Javorová projekty', name: 'Adéla Novotná',
     email: 'sprava@javorova.example', password: token(),

@@ -1,7 +1,7 @@
 import initSqlJs from 'sql.js';
 import schema from '../schema.sql';
 import { createStore } from '../workspace-store.mjs';
-import { populateClientExample, populateExample } from '../demo.mjs';
+import { createExample, populateClientExample } from '../demo.mjs';
 import { exampleAdsSnapshot, prepareExampleBinding } from '../google-ads-example.mjs';
 import { Failure } from '../validation.mjs';
 import * as credentials from './credentials.mjs';
@@ -45,7 +45,7 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
     if (path === '/api/state') return result(store.state(actor));
     if (path === '/api/handoffs') return result(store.handoffInbox(actor, searchParams));
     if (path === '/api/handoff-attention') return result(store.handoffAttention(actor, searchParams));
-    if (path === '/api/handoff-attention/count') return result({ count: store.handoffAttentionCount(actor) });
+    if (path === '/api/handoff-attention/count') return result(store.handoffAttentionCounts(actor));
     const delivery = /^\/api\/handoffs\/(\d+)$/.exec(path);
     if (delivery) return result(store.handoffDetail(actor, delivery[1]));
     if (path === '/api/client/report') return result(store.clientReport(actor, searchParams));
@@ -89,8 +89,9 @@ async function transact(input) {
       const record = read.result;
       const sqlite = new SQL.Database(record?.snapshot);
       try {
-        const store = createStore(sqliteConnection(sqlite), schema, credentials);
-        const profiles = record?.profiles ?? populateExample(store, credentials.token);
+        const db = sqliteConnection(sqlite);
+        const open = (options) => createStore(db, schema, credentials, options);
+        const { store, profiles } = record ? { store: open(), profiles: record.profiles } : createExample(open, credentials.token);
         if (record && store.upgraded && !profiles.client) {
           const profile = populateClientExample(store, credentials.token, profiles.admin.id, profiles.care.id);
           if (profile) profiles.client = profile;

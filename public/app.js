@@ -24,10 +24,10 @@ const events = {
   handoff_claim_evidence_requested: 'Vyžádání podkladů', handoff_claim_evidence_supplied: 'Doplnění podkladů klientem',
 };
 const available = {
-  admin: ['prehled', 'poptavky', 'predani', 'reakce', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
+  admin: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
   marketing: ['prehled', 'poptavky', 'kampane', 'ucet'],
   agent: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'ucet'],
-  care: ['prehled', 'poptavky', 'predani', 'reakce', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
+  care: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
   investor: ['prehled', 'portfolio', 'schranka', 'ucet'],
   client: ['prehled', 'reakce', 'ucet'],
 };
@@ -35,6 +35,7 @@ const titles = {
   prehled: ['Přehled', 'grid'], poptavky: ['Poptávky', 'list'], ukoly: ['Úkoly', 'check'],
   predani: ['Předání klientům', 'check'],
   reakce: ['Čeká na reakci', 'mail'],
+  eskalace: ['Eskalace reklamací', 'clock'],
   kampane: ['Klienti a kampaně', 'bag'],
   upozorneni: ['Upozornění', 'mail'], investori: ['Investoři', 'bag'], komunikace: ['Zprávy pro investory', 'mail'],
   uzivatele: ['Uživatelé', 'user'], historie: ['Historie změn', 'clock'],
@@ -53,7 +54,7 @@ let renderNumber = 0;
 let busy = false;
 let clientQuery = '';
 let handoffParams = new URLSearchParams();
-let attentionPage = 1;
+let attentionPages = { reakce: 1, eskalace: 1 };
 let checkingAttention = false;
 let adsFormValues = {};
 
@@ -275,7 +276,7 @@ function overview() {
   if (unread) output.push(actions(link('Nepřečtená upozornění (' + unread + ')', '#upozorneni', { className: 'button secondary' })));
   if (state.handoffSummary?.active) output.push(actions(link('Otevřené reklamace (' + state.handoffSummary.active + ')', '#predani',
     { className: 'button secondary' })));
-  if (typeof state.handoffAttention === 'number') output.push(attentionLink());
+  if (typeof state.handoffAttention === 'number') output.push(actions(attentionLink('eskalace'), attentionLink('reakce')));
   if (state.tasks) {
     const upcoming = state.tasks.filter((task) => !task.done_at).slice(0, 5);
     output.push(card('Otevřené úkoly', table(['Úkol', 'Termín', 'Odpovídá'], upcoming
@@ -532,7 +533,7 @@ async function clientOverview() {
   const page = (value) => update(new URLSearchParams([...query, ['page', value]]));
   return [
     heading('Klientský přehled', pill(report.client)),
-    attentionLink(),
+    attentionLink('reakce'),
     metrics([
       ['Předané poptávky', report.totals.handed],
       ['Evidované náklady', czk(report.totals.cost_cents)],
@@ -569,10 +570,37 @@ const claimStatus = (status, turn) => {
   return status ? pill(claimStates[status], status === 'accepted' ? 'positive' : '') : '—';
 };
 
-const attentionLabel = () => (state.user.role === 'client' ? 'Čeká na vaši odpověď' : 'Čeká na reakci týmu') + ' (' + state.handoffAttention + ')';
+const responseTitle = (route) => route === 'eskalace' ? titles.eskalace[0]
+  : state.user.role === 'client' ? 'Čeká na vaši odpověď' : 'Čeká na reakci týmu';
+const responseCounters = {
+  reakce: { stateKey: 'handoffAttention', badge: 'handoff-attention-count', alert: 'handoff-alert' },
+  eskalace: { stateKey: 'handoffEscalations', badge: 'handoff-escalations-count', alert: 'handoff-escalations-alert' },
+};
+const responseLabel = (route, count) => responseTitle(route) + ' (' + count + ')';
 
-function attentionLink() {
-  return link(attentionLabel(), '#reakce', { id: 'handoff-alert', className: 'button secondary attention-link', hidden: !state.handoffAttention });
+function attentionLink(route) {
+  const { stateKey, alert } = responseCounters[route];
+  const count = state[stateKey] ?? 0;
+  return link(responseLabel(route, count), '#' + route, { id: alert, className: 'button secondary attention-link', hidden: !count });
+}
+
+function updateCounter(route, count) {
+  const { stateKey, badge, alert } = responseCounters[route];
+  if (!Number.isInteger(count) || count === state[stateKey]) return;
+  state[stateKey] = count;
+  for (const [key, label] of [[badge, String(count)], [alert, responseLabel(route, count)]]) {
+    const element = $(key);
+    if (element) {
+      element.textContent = label;
+      element.hidden = !count;
+    }
+  }
+}
+
+function deadline(due, overdue) {
+  if (!due) return '—';
+  return node('span', { className: 'claim-deadline' }, node('time', { datetime: due }, formatDate(due)),
+    node('span', { className: 'pill overdue', 'data-claim-deadline': due, hidden: !overdue }, 'Po lhůtě'));
 }
 
 async function refreshAttention() {
@@ -580,38 +608,31 @@ async function refreshAttention() {
   if (document.hidden || busy || checkingAttention || typeof current?.handoffAttention !== 'number') return;
   checkingAttention = true;
   try {
-    const { count } = await api('/api/handoff-attention/count');
-    if (state !== current || count === state.handoffAttention) return;
-    state.handoffAttention = count;
-    const badge = $('handoff-attention-count');
-    if (badge) {
-      badge.textContent = String(count);
-      badge.hidden = !count;
-    }
-    const alert = $('handoff-alert');
-    if (alert) {
-      alert.textContent = attentionLabel();
-      alert.hidden = !count;
-    }
+    const { count, overdue, checkedAt } = await api('/api/handoff-attention/count');
+    if (state !== current) return;
+    updateCounter('reakce', count);
+    updateCounter('eskalace', overdue);
+    for (const status of screen.querySelectorAll('[data-claim-deadline]')) status.hidden = status.dataset.claimDeadline > checkedAt;
   } catch {
     // The next refresh retries without interrupting a draft or changing the current view.
   } finally { checkingAttention = false; }
 }
 
-async function handoffAttention() {
-  const inbox = await api('/api/handoff-attention?page=' + attentionPage);
+async function handoffAttention(route) {
+  const escalations = route === 'eskalace';
+  const inbox = await api('/api/handoff-attention?page=' + attentionPages[route] + (escalations ? '&overdue=1' : ''));
   const client = state.user.role === 'client';
   return [
-    heading(client ? 'Čeká na vaši odpověď' : 'Čeká na reakci týmu', actionButton('Obnovit seznam', () => run(refresh))),
+    heading(responseTitle(route), actionButton('Obnovit seznam', () => run(refresh))),
     node('section', { className: 'card' }, [
-      table(['Poptávka', 'Kampaň', 'Předáno', 'Reklamace'], inbox.rows.map((row) => [
-        link(row.name, '#predani/' + row.id + '/reakce'), row.campaign, formatDate(row.handed_day),
-        claimStatus(row.claim_status, row.claim_turn),
-      ]), 'Žádná reklamace teď nečeká na vaši reakci.'),
+      table(['Poptávka', 'Kampaň', 'Reklamace', 'Na tahu', 'Termín reakce'], inbox.rows.map((row) => [
+        link(row.name, '#predani/' + row.id + '/' + route), row.campaign, claimStatus(row.claim_status, row.claim_turn),
+        row.claim_turn === 'request' ? (client ? 'Vy' : 'Klient') : 'Tým', deadline(row.sla_due_at, row.sla_overdue),
+      ]), escalations ? 'Žádná otevřená reklamace není po lhůtě.' : 'Žádná reklamace teď nečeká na vaši reakci.'),
       pagination(inbox.page, inbox.pages, (page) => run(async () => {
-        const previous = attentionPage;
-        attentionPage = page;
-        try { await render(true); } catch (error) { attentionPage = previous; throw error; }
+        const previous = attentionPages[route];
+        attentionPages[route] = page;
+        try { await render(true); } catch (error) { attentionPages[route] = previous; throw error; }
       })),
     ]),
   ];
@@ -637,9 +658,9 @@ async function handoffInbox() {
     metrics([['Předané poptávky', summary.total], ['Potvrzená převzetí', summary.confirmed], ['Otevřené reklamace', summary.active]]),
     card('Přehled předání', [
       form('Použít filtr', [status], ({ status }) => update({ status })),
-      table(['Poptávka', 'Klient', 'Předáno', 'Převzetí', 'Reklamace'], inbox.rows.map((row) => [
+      table(['Poptávka', 'Klient', 'Předáno', 'Převzetí', 'Reklamace', 'Termín reakce'], inbox.rows.map((row) => [
         node('span', {}, link(row.name, '#predani/' + row.id), node('small', { className: 'line-meta' }, row.campaign)),
-        row.client, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status, row.claim_turn),
+        row.client, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status, row.claim_turn), deadline(row.sla_due_at, row.sla_overdue),
       ]), 'V tomto přehledu zatím nejsou žádné předané poptávky.'),
       pagination(inbox.page, inbox.pages, (page) => update({ status: inbox.status, page })),
     ]),
@@ -657,7 +678,7 @@ function newClaimForm(deliveryId) {
   }, 'Reklamace byla podána.'));
 }
 
-function claimCard(claim, team) {
+function claimCard(claim, team, delivery) {
   const take = claim.status === 'open' || (claim.status === 'review' && claim.reviewer_id !== state.user.id);
   const canResolve = claim.status === 'review' && (state.user.role === 'admin' || claim.reviewer_id === state.user.id);
   const args = { id: claim.id, version: claim.version };
@@ -679,6 +700,9 @@ function claimCard(claim, team) {
   };
   return card('Reklamace #' + claim.id, [
     actions(claimStatus(claim.status, turn), node('span', { className: 'muted' }, formatDate(claim.filed_at) + ' · ' + claim.reporter)),
+    delivery?.sla_due_at ? node('dl', { className: 'claim-term' }, node('dt', {},
+      turn === 'request' ? (team ? 'Termín klienta' : 'Váš termín') : 'Termín týmu'),
+    node('dd', {}, deadline(delivery.sla_due_at, delivery.sla_overdue))) : null,
     node('p', { className: 'claim-reason' }, claimReasons[claim.reason]),
     claim.description ? node('p', { className: 'prose' }, claim.description) : null,
     team && claim.reviewer ? node('p', { className: 'muted' }, 'Řeší ' + claim.reviewer + ' · ' + formatDate(claim.reviewed_at)) : null,
@@ -698,10 +722,10 @@ function claimCard(claim, team) {
   ], 'claim-card');
 }
 
-async function handoffView(id, fromAttention) {
+async function handoffView(id, route) {
   const { delivery, claims } = await api('/api/handoffs/' + id);
   const team = state.user.role !== 'client';
-  const back = fromAttention ? '#reakce' : team ? '#predani' : '#prehled';
+  const backLabel = { reakce: 'Zpět k upozorněním', eskalace: 'Zpět k eskalacím', predani: 'Zpět k předáním', prehled: 'Zpět do přehledu' };
   const summary = node('dl', { className: 'detail-grid' }, [
     ['Kontakt', delivery.email], ['Projekt', delivery.project], ['Kampaň', delivery.campaign + ' · ' + delivery.code],
     ['Předáno', formatDate(delivery.handed_at)], ['Klient', delivery.client], ['Převzetí', receiptStatus(delivery)],
@@ -710,13 +734,14 @@ async function handoffView(id, fromAttention) {
     'Potvrzení převzetí · ' + delivery.confirmed_by + ' · ' + formatDate(delivery.confirmed_at)) : null;
   return [
     heading(delivery.name, actions(actionButton('Obnovit detail', () => run(refresh)),
-      link(fromAttention ? 'Zpět k upozorněním' : team ? 'Zpět k předáním' : 'Zpět do přehledu', back, { className: 'button secondary' }))),
+      link(backLabel[route], '#' + route, { className: 'button secondary' }))),
     card('Předaná poptávka', [
       summary, receipt,
       !team && !delivery.confirmed_at ? actions(actionButton('Potvrdit převzetí',
         () => command('confirm-handoff', { id }, 'Převzetí bylo potvrzeno.'), 'primary')) : null,
     ], 'handoff-detail'),
-    claims.length ? claims.map((claim) => claimCard(claim, team)) : team ? card('Reklamace', empty('K tomuto předání není podaná reklamace.')) : null,
+    claims.length ? claims.map((claim, index) => claimCard(claim, team, index === 0 ? delivery : null))
+      : team ? card('Reklamace', empty('K tomuto předání není podaná reklamace.')) : null,
     !team && !claims.some((claim) => ['open', 'review'].includes(claim.status))
       ? card('Podání reklamace', newClaimForm(id)) : null,
   ].flat().filter(Boolean);
@@ -781,7 +806,7 @@ function account() {
 const views = {
   prehled: overview, poptavky: leadList, kampane: campaignManagement, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
   predani: handoffInbox,
-  reakce: handoffAttention,
+  reakce: () => handoffAttention('reakce'), eskalace: () => handoffAttention('eskalace'),
   komunikace: () => messages(false), portfolio: () => positions(true), schranka: () => messages(true),
   historie: () => [heading('Historie změn'), card('Aktivita organizace', timeline(state.activity))], ucet: account,
 };
@@ -798,8 +823,11 @@ function navigation(active) {
   $('toolbar-role').textContent = roleNames[role];
   const links = available[role].map((route) => {
     const [label, glyph] = titles[route];
-    const badge = route === 'reakce' ? node('span', { id: 'handoff-attention-count', className: 'attention-count', hidden: !state.handoffAttention,
-      'aria-live': 'polite' }, String(state.handoffAttention)) : null;
+    const counter = responseCounters[route];
+    const count = counter ? state[counter.stateKey] ?? 0 : 0;
+    const badge = counter ? node('span', { id: counter.badge,
+      className: route === 'eskalace' ? 'attention-count overdue' : 'attention-count',
+      hidden: !count, 'aria-live': 'polite' }, String(count)) : null;
     return node('a', { href: '#' + route, 'aria-current': route === active ? 'page' : null }, icon(glyph), label, badge);
   });
   if (browserDemo) links.push(node('a', { href: './', target: '_blank', rel: 'noopener' }, icon('user'), 'Otevřít další roli'));
@@ -816,14 +844,15 @@ async function render(propagateError = false) {
     return;
   }
   const lead = /^poptavka\/(\d{1,12})$/.exec(hash);
-  const handoff = /^predani\/(\d{1,12})(\/reakce)?$/.exec(hash);
-  const maySeeHandoff = ['admin', 'care', 'client'].includes(state.user.role);
-  const route = handoff && maySeeHandoff ? (handoff[2] ? 'reakce' : state.user.role === 'client' ? 'prehled' : 'predani') : lead ? 'poptavky' : hash;
-  const active = available[state.user.role].includes(route) ? route : 'prehled';
+  const handoff = /^predani\/(\d{1,12})(?:\/(reakce|eskalace))?$/.exec(hash);
+  const role = state.user.role;
+  const maySeeHandoff = ['admin', 'care', 'client'].includes(role);
+  const route = handoff && maySeeHandoff ? (handoff[2] || (role === 'client' ? 'prehled' : 'predani')) : lead ? 'poptavky' : hash;
+  const active = available[role].includes(route) ? route : 'prehled';
   const report = active === 'prehled' && state.user.role === 'client';
   navigation(active);
   try {
-    const content = handoff && maySeeHandoff ? await handoffView(handoff[1], Boolean(handoff[2])) : report ? await clientOverview()
+    const content = handoff && maySeeHandoff ? await handoffView(handoff[1], active) : report ? await clientOverview()
       : lead && active === 'poptavky' && state.user.role !== 'marketing' ? await leadView(lead[1]) : await views[active]();
     if (revision === renderNumber) screen.replaceChildren(...content);
   } catch (e) {
@@ -833,7 +862,7 @@ async function render(propagateError = false) {
       link('Zpět do přehledu', '#' + active));
     else if (report || active === 'predani') screen.replaceChildren(heading(report ? 'Klientský přehled' : 'Předání klientům'),
       empty(e.message), actionButton('Obnovit přehled', () => run(refresh)));
-    else if (active === 'reakce') screen.replaceChildren(heading('Čeká na reakci'), empty(e.message), actionButton('Obnovit seznam', () => run(refresh)));
+    else if (responseCounters[active]) screen.replaceChildren(heading(responseTitle(active)), empty(e.message), actionButton('Obnovit seznam', () => run(refresh)));
     else screen.replaceChildren(heading('Poptávka'), empty(e.message), link('Zpět k poptávkám', '#poptavky'));
   }
 }
@@ -843,7 +872,7 @@ $('logout').addEventListener('click', () => void run(async () => {
   state = undefined;
   clientQuery = '';
   handoffParams = new URLSearchParams();
-  attentionPage = 1;
+  attentionPages = { reakce: 1, eskalace: 1 };
   adsFormValues = {};
   document.body.classList.remove('menu-open');
   $('menu-toggle').setAttribute('aria-expanded', 'false');

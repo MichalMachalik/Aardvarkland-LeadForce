@@ -2,8 +2,9 @@ import { Failure, id, text } from './validation.mjs';
 
 const reasons = ['unreachable', 'invalid_contact', 'duplicate', 'out_of_scope', 'other'];
 const active = (status) => status === 'open' || status === 'review';
-const stamp = () => new Date().toISOString();
 const pageSize = 25;
+const teamHours = 24;
+const clientHours = 72;
 const handoffJoin = `FROM client_leads d
   JOIN leads l ON l.workspace_id=d.workspace_id AND l.id=d.lead_id
   JOIN client_campaigns c ON c.workspace_id=d.workspace_id AND c.id=d.campaign_id
@@ -18,12 +19,18 @@ const handoffJoin = `FROM client_leads d
     SELECT m.id FROM handoff_claim_messages m WHERE m.workspace_id=last.workspace_id AND m.claim_id=last.id ORDER BY m.id DESC LIMIT 1
   )
   WHERE d.workspace_id=? AND d.handed_day IS NOT NULL `;
+const openClaim = "last.status IN ('open','review')";
+const clientTurn = "(last.status='review' AND message.kind='request')";
+const teamTurn = `(${openClaim} AND NOT (${clientTurn} IS TRUE))`;
+// Taking ownership does not count as a reply. Only a message starts a new turn.
+const dueAt = `CASE WHEN ${openClaim} THEN strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(message.created_at,last.filed_at),
+  CASE WHEN ${clientTurn} THEN '+${clientHours} hours' ELSE '+${teamHours} hours' END) END`;
+const overdue = `(${dueAt} <= ?)`;
 const columns = `l.id,l.name,l.email,l.handed_at,d.handed_day,c.name AS campaign,c.code,c.project,a.name AS client,
   receipt.confirmed_at,confirmer.name AS confirmed_by,last.status AS claim_status,
-  CASE WHEN last.status='review' THEN message.kind END AS claim_turn`;
+  CASE WHEN last.status='review' THEN message.kind END AS claim_turn,
+  ${dueAt} AS sla_due_at,COALESCE(${overdue},0) AS sla_overdue`;
 const missing = () => new Failure(404, 'Předaná poptávka nebyla nalezena.');
-const clientTurn = " AND last.status='review' AND message.kind='request'";
-const teamTurn = " AND (last.status='open' OR (last.status='review' AND message.kind='reply'))";
 
 function requestKey(value, label) {
   if (typeof value !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value)) {
@@ -32,7 +39,9 @@ function requestKey(value, label) {
   return value;
 }
 
-export function handoffFeedback({ get, all, run, event, allow, clientName }) {
+export function handoffFeedback({ get, all, run, event, allow, clientName, clock }) {
+  const stamp = () => new Date(clock()).toISOString();
+
   function scope(actor) {
     if (actor.role === 'client') return [' AND c.client_id=?', [clientName(actor).id]];
     allow(actor, 'admin', 'care');
@@ -42,7 +51,7 @@ export function handoffFeedback({ get, all, run, event, allow, clientName }) {
 
   function delivery(actor, value) {
     const [filter, args] = scope(actor);
-    const row = get('SELECT ' + columns + ' ' + handoffJoin + ' AND l.id=?' + filter, actor.workspace_id, id(value), ...args);
+    const row = get('SELECT ' + columns + ' ' + handoffJoin + ' AND l.id=?' + filter, stamp(), actor.workspace_id, id(value), ...args);
     if (!row) throw missing();
     return row;
   }
@@ -72,18 +81,18 @@ export function handoffFeedback({ get, all, run, event, allow, clientName }) {
       COUNT(CASE WHEN last.status IN ('open','review') THEN 1 END) AS active ` + handoffJoin + filter, actor.workspace_id, ...args);
   }
 
-  function list(actor, params, extra, status) {
+  function list(actor, params, condition, status, escalations = false) {
     const [filter, args] = scope(actor);
     const requested = params.has('page') ? id(params.get('page')) : 1;
-    const predicate = handoffJoin + filter + extra;
-    const values = [actor.workspace_id, ...args];
+    const checkedAt = stamp();
+    const predicate = handoffJoin + filter + ' AND ' + condition;
+    const values = escalations ? [actor.workspace_id, ...args, checkedAt] : [actor.workspace_id, ...args];
     const { total } = get('SELECT COUNT(*) AS total ' + predicate, ...values);
     const pages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(requested, pages);
     const rows = all('SELECT ' + columns + ' ' + predicate +
-      ` ORDER BY CASE last.status WHEN 'open' THEN 0 WHEN 'review' THEN 1 ELSE 2 END,
-        CASE WHEN last.status IN ('open','review') THEN COALESCE(message.created_at,last.filed_at) END ASC, l.handed_at DESC,l.id DESC LIMIT ? OFFSET ?`,
-    ...values, pageSize, (page - 1) * pageSize);
+      ' ORDER BY sla_overdue DESC, sla_due_at IS NULL, sla_due_at, l.handed_at DESC,l.id DESC LIMIT ? OFFSET ?',
+    checkedAt, ...values, pageSize, (page - 1) * pageSize);
     return { rows, status, page, pages };
   }
 
@@ -91,23 +100,32 @@ export function handoffFeedback({ get, all, run, event, allow, clientName }) {
     allow(actor, 'admin', 'care');
     const status = params.get('status') || 'active';
     const filters = {
-      active: " AND last.status IN ('open','review')",
-      waiting: ' AND receipt.lead_id IS NULL',
-      confirmed: ' AND receipt.lead_id IS NOT NULL',
-      closed: " AND last.status IN ('accepted','rejected')",
+      active: openClaim,
+      waiting: 'receipt.lead_id IS NULL',
+      confirmed: 'receipt.lead_id IS NOT NULL',
+      closed: "last.status IN ('accepted','rejected')",
       client_turn: clientTurn,
-      all: '',
+      all: '1=1',
     };
     if (!Object.hasOwn(filters, status)) throw new Failure(422, 'Vyberte platný stav předání.');
     return list(actor, params, filters[status], status);
   }
 
-  function attentionCount(actor) {
+  function attentionCounts(actor) {
     const [filter, args] = scope(actor);
-    return get('SELECT COUNT(*) AS count ' + handoffJoin + filter + (actor.role === 'client' ? clientTurn : teamTurn), actor.workspace_id, ...args).count;
+    const checkedAt = stamp();
+    const counts = actor.role === 'client'
+      ? get(`SELECT COUNT(*) AS count ${handoffJoin}${filter} AND ${clientTurn}`, actor.workspace_id, ...args)
+      : get(`SELECT COUNT(CASE WHEN ${teamTurn} THEN 1 END) AS count,
+          COUNT(CASE WHEN ${overdue} THEN 1 END) AS overdue ${handoffJoin}${filter}`, checkedAt, actor.workspace_id, ...args);
+    return { ...counts, checkedAt };
   }
 
   function attention(actor, params) {
+    if (params.get('overdue') === '1') {
+      allow(actor, 'admin', 'care');
+      return list(actor, params, overdue, 'overdue', true);
+    }
     return list(actor, params, actor.role === 'client' ? clientTurn : teamTurn, 'attention');
   }
 
@@ -158,7 +176,7 @@ export function handoffFeedback({ get, all, run, event, allow, clientName }) {
       const lead = delivery(actor, body.id);
       const saved = run(`INSERT INTO handoff_receipts (workspace_id,lead_id,confirmed_by,confirmed_at)
         VALUES (?,?,?,?) ON CONFLICT(workspace_id,lead_id) DO NOTHING`,
-      actor.workspace_id, lead.id, actor.id, stamp());
+      actor.workspace_id, lead.id, actor.id, new Date().toISOString());
       if (saved.changes) event(actor, 'handoff_confirmed', '', lead.id);
     },
     'file-handoff-claim'(actor, body) {
@@ -207,5 +225,5 @@ export function handoffFeedback({ get, all, run, event, allow, clientName }) {
     'reply-claim-evidence': (actor, body) => postMessage(actor, body, 'reply'),
   };
 
-  return { details, summary, inbox, attention, attentionCount, actions };
+  return { details, summary, inbox, attention, attentionCounts, actions };
 }

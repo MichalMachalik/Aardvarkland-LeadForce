@@ -132,6 +132,11 @@ select { appearance: none; padding-right: 1.65rem; background-image: linear-grad
 .claim-thread p { margin: .35rem 0 0; }
 .attention-link { margin-bottom: .75rem; }
 .attention-count { margin-inline-start: auto; padding: .1rem .42rem; border-radius: 1rem; font-size: .76rem; background: #e4e9ed; color: #20252a; }
+.pill.overdue, .attention-count.overdue, #handoff-escalations-alert { background: #f9e7e5; color: #8a2924; }
+.claim-deadline, .claim-term { display: flex; flex-wrap: wrap; align-items: center; gap: .32rem .55rem; }
+.claim-term { margin: .6rem 0; }
+.claim-term dt { font-weight: 630; }
+.claim-term dd { margin: 0; }
 .notes, .timeline { list-style: none; margin: 0; padding: 0; }
 .notes li, .timeline li { border-top: 1px solid var(--line); padding: .66rem 0; }
 .notes time { margin-left: .65rem; }

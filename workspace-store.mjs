@@ -22,7 +22,7 @@ function slug(value) {
   return result;
 }
 
-export function createStore(db, schema, { hash, passwordDigest, passwordMatches, token }) {
+export function createStore(db, schema, { hash, passwordDigest, passwordMatches, token }, { claimClock = Date.now } = {}) {
   const upgraded = initializeSchema(db, schema);
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -43,7 +43,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     run('INSERT INTO activity (workspace_id,actor_id,lead_id,action,detail,created_at) VALUES (?,?,?,?,?,?)',
       actor.workspace_id, actor.id, lead, action, detail, now());
   const clients = clientAccounts({ get, all, run, event, allow });
-  const feedback = handoffFeedback({ get, all, run, event, allow, clientName: clients.clientName });
+  const feedback = handoffFeedback({ get, all, run, event, allow, clientName: clients.clientName, clock: claimClock });
   const googleAds = googleAdsStore({ get, all, run, event, allow, transaction });
   const publicActor = ({ id: userId, name, email: address, role, slug: org, workspace }) =>
     ({ id: userId, name, email: address, role, slug: org, workspace });
@@ -221,7 +221,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
   function state(actor) {
     const { workspace_id: org, id: userId, role } = actor;
     const base = { user: publicActor(actor), csrf: actor.csrf };
-    if (role === 'client') return { ...base, client: clients.clientName(actor).name, handoffAttention: feedback.attentionCount(actor) };
+    if (role === 'client') return { ...base, client: clients.clientName(actor).name, handoffAttention: feedback.attentionCounts(actor).count };
     if (role === 'investor') return {
       ...base,
       positions: all('SELECT id,project,principal_cents,maturity,status FROM positions WHERE workspace_id=? AND investor_id=? ORDER BY maturity', org, userId),
@@ -241,7 +241,9 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
       org, role === 'admin' ? 1 : 0, userId);
     if (role === 'admin' || role === 'care') {
       result.handoffSummary = feedback.summary(actor);
-      result.handoffAttention = feedback.attentionCount(actor);
+      const { count, overdue } = feedback.attentionCounts(actor);
+      result.handoffAttention = count;
+      result.handoffEscalations = overdue;
       result.investors = all("SELECT id,name,email FROM users WHERE workspace_id=? AND role='investor' AND enabled=1 ORDER BY name", org);
       result.positions = all('SELECT p.*,u.name AS investor FROM positions p JOIN users u ON u.id=p.investor_id WHERE p.workspace_id=? ORDER BY p.id DESC LIMIT 500', org);
       result.messages = all('SELECT m.*,u.name AS investor FROM messages m JOIN users u ON u.id=m.investor_id WHERE m.workspace_id=? ORDER BY m.id DESC LIMIT 500', org);
@@ -454,6 +456,6 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     handoffInbox: (...args) => transaction(() => feedback.inbox(...args), 'BEGIN'),
     handoffDetail: (...args) => transaction(() => feedback.details(...args), 'BEGIN'),
     handoffAttention: (...args) => transaction(() => feedback.attention(...args), 'BEGIN'),
-    handoffAttentionCount: feedback.attentionCount,
+    handoffAttentionCounts: feedback.attentionCounts,
     googleAds, createSession, close: () => db.close() };
 }

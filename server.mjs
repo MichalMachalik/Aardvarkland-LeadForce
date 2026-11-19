@@ -105,7 +105,7 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
       if (pathname === '/api/state') return json(res, 200, store.state(actor));
       if (pathname === '/api/handoffs') return json(res, 200, store.handoffInbox(actor, searchParams));
       if (pathname === '/api/handoff-attention') return json(res, 200, store.handoffAttention(actor, searchParams));
-      if (pathname === '/api/handoff-attention/count') return json(res, 200, { count: store.handoffAttentionCount(actor) });
+      if (pathname === '/api/handoff-attention/count') return json(res, 200, store.handoffAttentionCounts(actor));
       const delivered = /^\/api\/handoffs\/(\d+)$/.exec(pathname);
       if (delivered) return json(res, 200, store.handoffDetail(actor, delivered[1]));
       if (pathname === '/api/client/report') return json(res, 200, store.clientReport(actor, searchParams));
@@ -170,8 +170,8 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const demo = process.argv.includes('--demo');
   const config = configuration(demo);
-  const store = openStore(demo ? ':memory:' : databaseFile());
-  const profiles = demo ? (await import('./demo.mjs')).populateExample(store, token) : null;
+  const { store, profiles } = demo ? (await import('./demo.mjs')).createExample((options) => openStore(':memory:', options), token)
+    : { store: openStore(databaseFile()), profiles: null };
   const googleAds = demo ? { mode: 'demo', read: (await import('./google-ads-example.mjs')).exampleAdsSnapshot } : googleAdsProvider();
   const server = createWorkspaceServer(store, { origin: config.origin, profiles, googleAds });
   server.listen(config.port, '127.0.0.1', () => console.log(config.origin));
