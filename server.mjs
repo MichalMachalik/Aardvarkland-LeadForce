@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { base, configuration, databaseFile } from './config.mjs';
 import { Failure, sameSecret, token } from './security.mjs';
+import { googleAdsProvider } from './google-ads-provider.mjs';
 import { openStore } from './store.mjs';
 
 const standard = {
@@ -47,7 +48,7 @@ async function readJson(req) {
   return result;
 }
 
-export function createWorkspaceServer(store, { origin, profiles = null, log = console.error }) {
+export function createWorkspaceServer(store, { origin, profiles = null, googleAds = null, log = console.error }) {
   const secure = origin.startsWith('https:');
   const cookie = secure ? '__Host-workspace' : 'workspace';
   const setCookie = (value, maxAge = 8 * 60 * 60) => cookie + '=' + value + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + maxAge + (secure ? '; Secure' : '');
@@ -75,7 +76,7 @@ export function createWorkspaceServer(store, { origin, profiles = null, log = co
     }
     if (req.method === 'GET' && pathname === '/api/config') {
       const choices = profiles ? Object.values(profiles).map(({ role, name }) => ({ role, name })) : [];
-      return json(res, 200, { choices });
+      return json(res, 200, { choices, ...(googleAds ? { googleAds: googleAds.mode } : {}) });
     }
 
     const raw = req.headers.cookie?.split(';').map((entry) => entry.trim()).find((entry) => entry.startsWith(cookie + '='))?.slice(cookie.length + 1);
@@ -136,6 +137,14 @@ export function createWorkspaceServer(store, { origin, profiles = null, log = co
         limit(req, res);
         return json(res, 200, { ok: true }, { 'Set-Cookie': setCookie(store.changePassword(current, body)) });
       }
+      if (pathname === '/api/actions/sync-google-ads') {
+        const plan = store.googleAds.plan(current, body);
+        if (!googleAds) throw new Failure(503, 'Google Ads čeká na konfiguraci serveru.');
+        const snapshot = await googleAds.read(plan, body.scenario);
+        const authorized = store.session(raw);
+        if (!authorized) throw new Failure(401, 'Přihlaste se do pracovního prostoru.');
+        return json(res, 200, store.googleAds.apply(authorized, plan, snapshot));
+      }
       const action = /^\/api\/actions\/([a-z-]+)$/.exec(pathname);
       if (action) return json(res, 200, store.command(current, action[1], body));
     }
@@ -158,7 +167,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const config = configuration(demo);
   const store = openStore(demo ? ':memory:' : databaseFile());
   const profiles = demo ? (await import('./demo.mjs')).populateExample(store, token) : null;
-  const server = createWorkspaceServer(store, { origin: config.origin, profiles });
+  const googleAds = demo ? { mode: 'demo', read: (await import('./google-ads-example.mjs')).exampleAdsSnapshot } : googleAdsProvider();
+  const server = createWorkspaceServer(store, { origin: config.origin, profiles, googleAds });
   server.listen(config.port, '127.0.0.1', () => console.log(config.origin));
   const stop = () => server.close(() => store.close());
   process.once('SIGINT', stop);

@@ -5,8 +5,9 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node server.mjs",
+    "sync:google-ads": "node sync-google-ads.mjs",
     "demo": "node server.mjs --demo",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs standalone/audit-kampani/audit.test.cjs standalone/kontrola-pred-spustenim/links.test.cjs standalone/portal-investora/portal.test.cjs",
     "build": "node scripts/build-pages.mjs"
   },
   "devDependencies": {

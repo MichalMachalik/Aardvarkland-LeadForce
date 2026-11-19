@@ -17,6 +17,7 @@ async function openCase(demo, callback) {
   const { createWorkspaceServer } = await import('../server.mjs');
   const { openStore } = await import('../store.mjs');
   const { populateExample } = await import('../demo.mjs');
+  const { exampleAdsSnapshot } = await import('../google-ads-example.mjs');
   const { token } = await import('../security.mjs');
   const probe = createServer();
   await once(probe.listen(0, '127.0.0.1'), 'listening');
@@ -30,7 +31,8 @@ async function openCase(demo, callback) {
     workspace: 'Prázdná organizace', slug: 'prazdna', name: 'Správce testu',
     email: 'spravce@test.example', password: 'Testovaci_heslo_2026',
   });
-  const server = createWorkspaceServer(store, { origin, profiles, log: (error) => errors.push(error.message) });
+  const googleAds = demo ? { mode: 'demo', read: exampleAdsSnapshot } : null;
+  const server = createWorkspaceServer(store, { origin, profiles, googleAds, log: (error) => errors.push(error.message) });
   await once(server.listen(port, '127.0.0.1'), 'listening');
   try {
     await exerciseBrowser(origin, errors, callback);
@@ -301,6 +303,7 @@ async function clientPortal({ page }) {
 async function published(context) {
   await demo(context);
   await clientPortal(context);
+  await googleAdsPilot(context);
   const isolated = await context.page(1366, true);
   await btn(isolated, /^Správce ·/).click();
   await goto(isolated, 'Poptávky');
@@ -326,9 +329,40 @@ async function published(context) {
   assert.equal(await reset.getByText('Karolína Procházková', { exact: true }).count(), 0);
 }
 
+async function googleAdsPilot({ page }) {
+  const editor = await page();
+  await btn(editor, /^Marketing ·/).click();
+  await titled(editor, 'Přehled týmu');
+  await goto(editor, 'Klienti a kampaně');
+  await editor.getByRole('heading', { name: 'Import Google Ads' }).waitFor();
+  const panel = editor.getByRole('region', { name: 'Výsledek importu Byty pod Lípou' });
+  const sync = async (scenario, expected) => {
+    await editor.getByLabel('Scénář zdroje').selectOption(scenario);
+    await btn(editor, 'Synchronizovat náklady').click();
+    await editor.getByText('Synchronizace dokončena.', { exact: true }).waitFor();
+    assert.deepEqual(await panel.locator('.sync-counts li').allTextContents(), expected);
+  };
+  await sync('gap', ['Nové 2', 'Opravené 0', 'Beze změny 0', 'Potvrzená nula 1', 'Chybějící dny 1']);
+  await sync('gap', ['Nové 0', 'Opravené 0', 'Beze změny 2', 'Potvrzená nula 1', 'Chybějící dny 1']);
+  const client = await page(320);
+  await btn(client, /^Klient ·/).click();
+  await titled(client, 'Klientský přehled');
+  const row = client.getByRole('row', { name: /Byty pod Lípou LPF-601/ });
+  await row.getByText('Chybějící dny Google Ads 1', { exact: true }).waitFor();
+  assert.equal(await row.getByRole('cell').nth(2).textContent().then((v) => v.replace(/\s/g, '')), '2550Kč');
+  assert.equal(await row.getByRole('cell').nth(4).textContent(), '—');
+  assert.equal(await btn(client, 'Synchronizovat náklady').count(), 0);
+  await sync('complete', ['Nové 1', 'Opravené 0', 'Beze změny 2', 'Potvrzená nula 1', 'Chybějící dny 0']);
+  await sync('correction', ['Nové 0', 'Opravené 1', 'Beze změny 2', 'Potvrzená nula 1', 'Chybějící dny 0']);
+  await client.reload();
+  await titled(client, 'Klientský přehled');
+  assert.equal(await row.getByRole('cell').nth(2).textContent().then((v) => v.replace(/\s/g, '')), '3350Kč');
+  assert.equal(await row.getByRole('cell').nth(4).textContent().then((v) => v.replace(/\s/g, '')), '1116,67Kč');
+}
+
 const check = process.env.TEST_URL
   ? exerciseBrowser(process.env.TEST_URL, [], published, true)
-  : openCase(true, async (context) => { await demo(context); await clientPortal(context); }).then(() => openCase(false, blank));
+  : openCase(true, async (context) => { await demo(context); await clientPortal(context); await googleAdsPilot(context); }).then(() => openCase(false, blank));
 check.then(() => {
-  console.log('PASS workspace, client report, campaign cost correction, client invites and scoped handoffs');
+  console.log('PASS workspace, client report, scoped handoffs and Google Ads repeat, gaps and correction');
 }).catch((error) => { console.error(error); process.exitCode = 1; });

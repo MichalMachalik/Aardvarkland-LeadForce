@@ -2,6 +2,7 @@ import initSqlJs from 'sql.js';
 import schema from '../schema.sql';
 import { createStore } from '../workspace-store.mjs';
 import { populateClientExample, populateExample } from '../demo.mjs';
+import { exampleAdsSnapshot, prepareExampleBinding } from '../google-ads-example.mjs';
 import { Failure } from '../validation.mjs';
 import * as credentials from './credentials.mjs';
 import { sqliteConnection } from './sqlite.mjs';
@@ -19,7 +20,7 @@ const sessionResult = (session) => ({ ...result({ ok: true }), session });
 function handle(store, profiles, { path: url, method, body, session, csrf }) {
   const { pathname: path, searchParams } = new URL(url, 'https://workspace.example');
   if (method === 'GET' && path === '/api/config') {
-    return result({ choices: Object.values(profiles).map(({ role, name }) => ({ role, name })) });
+    return result({ choices: Object.values(profiles).map(({ role, name }) => ({ role, name })), googleAds: 'demo' });
   }
   if (method === 'POST' && typeof body.email === 'string' && !/\.example$/i.test(body.email.trim())) {
     throw new Failure(422, 'Použijte smyšlenou e-mailovou adresu s doménou .example.');
@@ -55,6 +56,10 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
       return sessionResult(null);
     }
     if (path === '/api/password') return sessionResult(store.changePassword(actor, body));
+    if (path === '/api/actions/sync-google-ads') {
+      const plan = store.googleAds.plan(actor, body);
+      return result(store.googleAds.apply(actor, plan, exampleAdsSnapshot(plan, body.scenario)));
+    }
     const action = /^\/api\/actions\/([a-z-]+)$/.exec(path);
     if (action) return result(store.command(actor, action[1], body));
   }
@@ -85,12 +90,13 @@ async function transact(input) {
           const profile = populateClientExample(store, credentials.token, profiles.admin.id, profiles.care.id);
           if (profile) profiles.client = profile;
         }
+        if (record && !record.adsReady) prepareExampleBinding(store, profiles);
         try { reply = handle(store, profiles, input); } catch (error) {
           if (!(error instanceof Failure)) throw error;
           reply = result({ error: error.message }, error.status);
         }
-        if (!record || store.upgraded || (input.method === 'POST' && reply.status < 400)) {
-          records.put({ profiles, snapshot: sqlite.export() }, 'current');
+        if (!record || store.upgraded || !record.adsReady || (input.method === 'POST' && reply.status < 400)) {
+          records.put({ profiles, adsReady: true, snapshot: sqlite.export() }, 'current');
         }
       } catch (error) {
         reject(error);

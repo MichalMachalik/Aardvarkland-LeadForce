@@ -65,26 +65,31 @@ export function clientAccounts({ get, all, run, event, allow }) {
     const ids = [org, client.id, ...(campaignId ? [campaignId] : [])];
     const rows = all(`WITH costs AS (
         SELECT campaign_id,SUM(cost_cents) AS cost_cents,COUNT(*) AS cost_days
-        FROM client_campaign_costs WHERE workspace_id=? AND day BETWEEN ? AND ? GROUP BY campaign_id
+        FROM client_report_costs WHERE workspace_id=? AND day BETWEEN ? AND ? GROUP BY campaign_id
       ), handoffs AS (
         SELECT campaign_id,COUNT(*) AS handed FROM client_leads
         WHERE workspace_id=? AND handed_day BETWEEN ? AND ? GROUP BY campaign_id
+      ), gaps AS (
+        SELECT campaign_id,COUNT(*) AS days_missing FROM google_ads_days
+        WHERE workspace_id=? AND missing=1 AND day BETWEEN ? AND ? GROUP BY campaign_id
       )
       SELECT c.id,c.name,c.project,c.source,c.code,p.cost_cents,COALESCE(p.cost_days,0) AS cost_days,
-        COALESCE(h.handed,0) AS handed
+        COALESCE(h.handed,0) AS handed,COALESCE(g.days_missing,0) AS import_missing
       FROM client_campaigns c LEFT JOIN costs p ON p.campaign_id=c.id LEFT JOIN handoffs h ON h.campaign_id=c.id
+      LEFT JOIN gaps g ON g.campaign_id=c.id
       WHERE c.workspace_id=? AND c.client_id=?` + selection + ' ORDER BY handed DESC,c.name,c.id',
-    org, from, to, org, from, to, ...ids);
-    const campaigns = rows.map((item) => ({ ...item, unit_cents: costPerHandoff(item.cost_cents, item.handed) }));
+    org, from, to, org, from, to, org, from, to, ...ids);
+    const campaigns = rows.map((item) => ({ ...item, unit_cents: item.import_missing ? null : costPerHandoff(item.cost_cents, item.handed) }));
     if (exportReport) return csv([
-      ['od', 'do', 'kanal', 'id_kampane', 'kampan', 'projekt', 'naklady_czk', 'predane_poptavky', 'naklad_na_predani_czk', 'dny_se_zaznamem_nakladu'],
+      ['od', 'do', 'kanal', 'id_kampane', 'kampan', 'projekt', 'naklady_czk', 'predane_poptavky', 'naklad_na_predani_czk', 'dny_se_zaznamem_nakladu', 'chybejici_dny_google_ads'],
       ...campaigns.map((item) => [from, to, item.source, item.code, item.name, item.project,
-        asCzk(item.cost_cents), item.handed, asCzk(item.unit_cents), item.cost_days]),
+        asCzk(item.cost_cents), item.handed, asCzk(item.unit_cents), item.cost_days, item.import_missing]),
     ]);
     const totalHanded = campaigns.reduce((sum, row) => sum + row.handed, 0);
     const recordedCost = campaigns.some((row) => row.cost_days > 0)
       ? campaigns.reduce((sum, row) => sum + (row.cost_cents ?? 0), 0) : null;
     const missingCost = campaigns.filter((row) => row.handed > 0 && row.cost_cents === null).length;
+    const importMissing = campaigns.reduce((sum, row) => sum + row.import_missing, 0);
     const pages = Math.max(1, Math.ceil(totalHanded / pageSize));
     const currentPage = Math.min(page, pages);
     const deliveries = all(`SELECT l.id,l.name,l.email,l.handed_at,d.handed_day,c.name AS campaign,c.project,c.source,c.code
@@ -95,8 +100,8 @@ export function clientAccounts({ get, all, run, event, allow }) {
     ...ids, from, to, pageSize, (currentPage - 1) * pageSize);
     return {
       client: client.name, period: { from, to }, campaign_id: campaignId, options, campaigns, deliveries,
-      page: currentPage, pages,
-      totals: { handed: totalHanded, cost_cents: recordedCost, unit_cents: missingCost ? null : costPerHandoff(recordedCost, totalHanded), missing_cost: missingCost },
+      page: currentPage, pages, import_missing: importMissing,
+      totals: { handed: totalHanded, cost_cents: recordedCost, unit_cents: missingCost || importMissing ? null : costPerHandoff(recordedCost, totalHanded), missing_cost: missingCost },
     };
   }
 

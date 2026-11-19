@@ -107,6 +107,12 @@ td a { font-weight: 630; text-underline-offset: .15em; }
 .line-meta { display: block; color: var(--muted); font-size: .8rem; }
 .report-note { margin: .6rem 0; font-size: .86rem; }
 .table-scroll + .actions { margin-top: .7rem; }
+.sync-result { margin-top: .75rem; padding: .72rem .8rem; border: 1px solid var(--line); border-radius: var(--radius); }
+.sync-result h3 { margin: 0; font-size: .94rem; }
+.sync-result p { margin: .2rem 0; font-size: .84rem; overflow-wrap: anywhere; }
+.sync-counts { display: flex; flex-wrap: wrap; gap: .36rem .8rem; list-style: none; margin: .45rem 0; padding: 0; font-size: .84rem; }
+.sync-config { margin-top: .75rem; }
+.sync-config summary { cursor: pointer; font-weight: 600; }
 form { min-width: 0; }
 label { display: grid; min-width: 0; gap: .27rem; color: var(--muted); font-size: .86rem; font-weight: 590; }
 label:has(textarea) { grid-column: 1/-1; }

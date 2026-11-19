@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Portfolio, harmonogram plateb, příležitosti a komunikace v Portálu investora.">
+  <title>Portál investora</title>
+  <!-- security -->
+  <!-- styles -->
+</head>
+<body>
+  <a class="skip" href="#main-content">Přejít na obsah</a>
+  <aside class="sidebar" id="workspace-nav">
+    <a class="brand" href="#prehled"><span class="mark" aria-hidden="true"><span class="ui-icon icon-portfolio"></span></span><span>Portál investora</span></a>
+    <nav class="primary-nav" aria-label="Hlavní nabídka">
+      <a href="#prehled" data-route="prehled"><span class="ui-icon icon-overview" aria-hidden="true"></span><span>Přehled</span></a>
+      <a href="#portfolio" data-route="portfolio"><span class="ui-icon icon-portfolio" aria-hidden="true"></span><span>Portfolio</span></a>
+      <a href="#prilezitosti" data-route="prilezitosti"><span class="ui-icon icon-bookmark" aria-hidden="true"></span><span>Příležitosti</span></a>
+      <a href="#komunikace" data-route="komunikace"><span class="ui-icon icon-mail" aria-hidden="true"></span><span>Komunikace</span> <span id="inbox-badge" class="nav-count" hidden></span></a>
+    </nav>
+    <!-- fixtures:start -->
+    <nav class="related-apps" aria-label="Související aplikace">
+      <a id="audit-link" href="../audit-kampani/index.html" target="_blank" rel="noopener" title="Otevře se v nové kartě">Audit kampaní<span class="external-mark" aria-hidden="true"></span></a>
+      <a id="launch-link" href="../kontrola-pred-spustenim/index.html" target="_blank" rel="noopener" title="Otevře se v nové kartě">Kontrola odkazů<span class="external-mark" aria-hidden="true"></span></a>
+    </nav>
+    <!-- fixtures:end -->
+  </aside>
+  <main class="main" id="main-content" tabindex="-1">
+    <div class="topbar">
+      <div class="topbar-left"><button id="nav-toggle" class="nav-toggle" type="button" aria-label="Skrýt navigaci" title="Skrýt navigaci" aria-controls="workspace-nav" aria-expanded="true" hidden><span class="panel-icon" aria-hidden="true"></span></button><span id="view-name">Přehled</span><span class="mobile-product">Portál investora</span></div>
+      <!-- fixtures:start --><a id="case-back" class="button secondary route-back" href="../audit-kampani/index.html?predani=1#leads" hidden><span class="back-mark" aria-hidden="true"></span>Zpět do Auditu</a><!-- fixtures:end -->
+      <!-- production:start --><button id="load-data" class="button secondary" type="button"><span class="ui-icon icon-import" aria-hidden="true"></span>Import dat</button><input id="data-file" type="file" accept=".json,application/json" hidden><!-- production:end -->
+    </div>
+    <div class="content">
+      <p id="notice" class="sr-only" role="status" aria-live="polite"></p>
+      <!-- production:start --><p id="data-status" class="data-status" role="status" aria-live="polite" hidden></p><!-- production:end -->
+      <section id="prehled" aria-labelledby="overview-title">
+        <header class="page-head">
+          <h1 id="overview-title" tabindex="-1">Přehled investora</h1>
+        </header>
+        <section class="card balance" aria-labelledby="balance-title">
+          <div class="balance-main"><h2 id="balance-title">Kapitál v aktivních pozicích</h2><strong id="portfolio-total"></strong></div>
+          <dl class="balance-stats"><div><dt>Aktivní pozice</dt><dd id="active-count"></dd></div><div><dt>Uložené příležitosti</dt><dd id="saved-count"></dd></div></dl>
+          <div class="balance-actions">
+            <a class="button primary" href="#portfolio"><span class="ui-icon icon-portfolio" aria-hidden="true"></span>Zobrazit portfolio</a>
+            <a class="button secondary" href="#prilezitosti">Prohlédnout příležitosti</a>
+          </div>
+        </section>
+        <div class="overview-grid">
+          <section class="card overview-card" aria-labelledby="payment-title">
+            <header class="card-head"><h2 id="payment-title">Nejbližší platba</h2><span class="detail-icon" aria-hidden="true"><span class="ui-icon icon-calendar"></span></span></header>
+            <strong id="payment-amount" class="payment-amount"></strong>
+            <p id="payment-project" class="payment-meta"></p>
+            <button id="payment-detail" class="button secondary" type="button">Detail plánované platby</button>
+          </section>
+          <section class="card overview-card" aria-labelledby="recent-title">
+            <header class="card-head"><div><h2 id="recent-title">Poslední komunikace</h2><p id="recent-summary"></p></div><a class="text-link" href="#komunikace">Všechny zprávy</a></header>
+            <ul id="recent-messages" class="message-list compact"></ul>
+          </section>
+        </div>
+        <!-- fixtures:start -->
+        <section id="case-card" class="card walkthrough" aria-labelledby="case-title" hidden>
+          <div><h2 id="case-title">Navázaná poptávka z Auditu</h2><p id="case-summary"></p></div>
+          <a class="button secondary" id="case-history" href="#komunikace">Zobrazit historii poptávky</a>
+        </section>
+        <!-- fixtures:end -->
+      </section>
+      <section id="portfolio" aria-labelledby="portfolio-title" hidden>
+        <header class="page-head"><h1 id="portfolio-title" tabindex="-1">Moje portfolio</h1><button id="export-portfolio" class="button primary" type="button"><span class="ui-icon icon-download" aria-hidden="true"></span>Stáhnout zobrazené pozice CSV</button></header>
+        <div class="filters portfolio-filters"><label class="sr-only" for="position-query">Hledat pozici</label><span class="search-field"><input id="position-query" type="search" placeholder="Hledat projekt nebo ID…" autocomplete="off"></span><label class="sr-only" for="position-filter">Stav pozice</label><select id="position-filter" class="filter-select"><option value="all">Všechny pozice</option><option value="active">Aktivní</option><option value="closed">Splacené</option></select></div>
+        <div class="card position-list" id="position-list"></div>
+        <div class="card empty-state" id="positions-empty" hidden><p>Filtrům neodpovídá žádná pozice.</p><button id="clear-position-filters" class="button secondary" type="button">Vymazat filtry</button></div>
+        <section id="payments" class="card overview-card payment-schedule" aria-labelledby="schedule-title">
+          <header class="card-head"><div><h2 id="schedule-title">Harmonogram plateb</h2><p id="schedule-summary" aria-live="polite"></p></div><button id="export-calendar" class="button secondary" type="button">Stáhnout kalendář (.ics)</button></header>
+          <ul class="payment-list" id="scheduled-payments"></ul>
+        </section>
+      </section>
+      <section id="prilezitosti" aria-labelledby="opportunities-title" hidden>
+        <header class="page-head"><h1 id="opportunities-title" tabindex="-1">Příležitosti</h1></header>
+        <div class="filters catalog-filters">
+          <div class="filter-field"><label for="opportunity-query">Hledat projekt</label><span class="search-field"><input id="opportunity-query" type="search" placeholder="Hledat název nebo kategorii…" autocomplete="off"></span></div>
+          <div class="filter-field"><label for="opportunity-category">Kategorie</label><select id="opportunity-category" class="filter-select"><option value="">Všechny kategorie</option></select></div>
+          <label class="toggle"><input id="saved-only" type="checkbox">Pouze uložené</label>
+        </div>
+        <div id="opportunity-list" class="opportunity-grid"></div>
+        <div id="opportunity-empty" class="card empty-state" hidden><p id="opportunity-empty-text"></p><button id="clear-filters" class="button secondary" type="button">Vymazat filtry</button></div>
+      </section>
+      <section id="komunikace" aria-labelledby="inbox-title" hidden>
+        <header class="page-head inbox-head"><h1 id="inbox-title" tabindex="-1">Komunikace</h1><span id="message-count" aria-live="polite"></span></header>
+        <div class="filters inbox-filters">
+          <label class="sr-only" for="message-query">Hledat ve zprávách</label><span class="search-field"><input id="message-query" type="search" placeholder="Hledat ve zprávách…" autocomplete="off"></span>
+          <label class="sr-only" for="message-filter">Zobrazit</label><select id="message-filter" class="filter-select"><option value="all">Všechny zprávy</option><option value="unread">Nepřečtené</option><option value="case" hidden disabled>Z průchodu Auditem</option></select>
+          <label class="sr-only" for="message-position">Pozice zprávy</label><select id="message-position" class="filter-select" hidden></select>
+        </div>
+        <ul id="inbox-list" class="message-list inbox-list"></ul>
+        <div id="inbox-empty" class="card empty-state" hidden><p>V tomto filtru nejsou žádné zprávy.</p><button id="show-all-messages" class="button secondary" type="button">Zobrazit všechny zprávy</button></div>
+      </section>
+      <footer class="content-foot">
+        <button id="reset-demo" class="text-link" type="button">Vymazat uložený stav</button>
+      </footer>
+    </div>
+  </main>
+  <dialog id="details" aria-labelledby="details-title">
+    <header class="dialog-head"><h2 id="details-title"></h2><button id="close-details" class="button secondary" autofocus type="button">Zavřít</button></header>
+    <div id="details-body"></div>
+  </dialog>
+  <!-- scripts -->
+</body>
+</html>

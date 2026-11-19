@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- security -->
+  <meta name="description" content="Audit nákladů a kvality poptávek z reklamních a CRM exportů.">
+  <title>Audit kampaní</title>
+  <!-- styles -->
+</head>
+<body>
+  <aside class="sidebar" id="workspace-nav">
+    <a class="brand" href="#report"><span class="mark" aria-hidden="true"><span class="ui-icon icon-chart"></span></span><span>Audit kampaní</span></a>
+    <nav class="primary-nav" aria-label="Hlavní nabídka">
+      <a href="#report" data-route="report"><span class="ui-icon icon-overview" aria-hidden="true"></span><span>Přehled</span></a>
+      <a href="#import" data-route="import"><span class="ui-icon icon-import" aria-hidden="true"></span><span>Import dat</span></a>
+      <a href="#leads" data-route="leads"><span class="ui-icon icon-record" aria-hidden="true"></span><span>Poptávky</span></a>
+    </nav>
+    <nav class="related-apps" aria-label="Související aplikace">
+      <a id="investor-nav" href="../portal-investora/index.html" target="_blank" rel="noopener" title="Otevře se v nové kartě">Portál investora<span class="external-mark" aria-hidden="true"></span></a>
+      <a href="../kontrola-pred-spustenim/index.html" target="_blank" rel="noopener" title="Otevře se v nové kartě">Kontrola odkazů<span class="external-mark" aria-hidden="true"></span></a>
+    </nav>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="topbar"><div class="topbar-left"><button id="nav-toggle" class="nav-toggle" type="button" aria-label="Skrýt navigaci" title="Skrýt navigaci" aria-controls="workspace-nav" aria-expanded="true" hidden><span class="panel-icon" aria-hidden="true"></span></button><span id="view-name">Přehled kampaní</span><span class="mobile-product">Audit kampaní</span></div></div>
+    <div class="content">
+      <div class="status" id="app-status" role="status" aria-live="polite" hidden></div>
+      <section id="report" class="view" aria-labelledby="report-title">
+        <header class="page-head">
+          <h1 id="report-title">Přehled kampaní</h1>
+          <div class="actions"><button class="button secondary" id="export"><span class="ui-icon icon-download" aria-hidden="true"></span>Stáhnout report</button><a class="button primary" href="#import"><span class="ui-icon icon-import" aria-hidden="true"></span>Importovat CSV</a></div>
+        </header>
+        <div class="metrics" id="metrics" aria-label="Souhrn kampaní"></div>
+        <form id="period" class="period card" aria-label="Období reportu">
+          <label>Od <input type="date" id="date-from" aria-describedby="period-error" required></label>
+          <label>Do <input type="date" id="date-to" aria-describedby="period-error" required></label>
+          <label>Kanál <select id="report-source" class="filter-select"><option value="">Všechny kanály</option></select></label>
+          <button class="button secondary" type="submit">Zobrazit období</button>
+          <span id="period-error" role="alert" class="period-error" hidden></span>
+          <p class="data-scope" id="data-scope"></p>
+        </form>
+
+        <div class="summary-grid">
+          <section class="card flow-overview" aria-labelledby="funnel-title"><h2 id="funnel-title">Od poptávky ke kvalifikaci</h2><div id="funnel"></div><div id="handoff-summary" class="handoff-summary" hidden></div></section>
+          <section class="card flow-overview" aria-labelledby="channels-title"><h2 id="channels-title">Výdaje podle kanálu</h2><div id="channel-bars"></div></section>
+        </div>
+
+        <div class="analysis-grid">
+          <section class="card comparison" aria-labelledby="comparison-title">
+            <div class="card-head"><div><h2 id="comparison-title">Náklady podle kampaně</h2><p>Cena za jakoukoli a za kvalifikovanou poptávku</p></div></div>
+            <div class="legend"><span><i class="legend-raw"></i>Všechny poptávky</span><span><i class="legend-qualified"></i>Kvalifikované</span></div>
+            <div id="cost-bars" class="cost-bars"></div>
+            <p class="insight" id="insight" hidden></p>
+          </section>
+
+          <section class="card quality" aria-labelledby="quality-title">
+            <div class="card-head"><div><h2 id="quality-title">Kontrola dat</h2><p>Stavy v období a duplicity v celém importu</p></div></div>
+            <p id="coverage" class="coverage"></p>
+            <ul id="quality-list" class="quality-list"></ul>
+            <button id="show-issues" class="button secondary full">Zobrazit nepřiřazené</button>
+            <button id="export-findings" class="button secondary full">Stáhnout zjištění CSV</button>
+          </section>
+        </div>
+
+        <section class="card campaigns" aria-labelledby="campaigns-title">
+          <div class="card-head table-heading"><div><h2 id="campaigns-title">Kampaně</h2><p>Kliknutím na cenu nebo počet otevřete výpočet.</p></div><label>Seřadit podle <select id="campaign-sort"><option value="cpql">Ceny za kvalifikovanou</option><option value="rate">Podílu kvalifikovaných</option><option value="spend">Výdajů</option><option value="name">Názvu kampaně</option></select></label></div>
+          <p class="scroll-hint">Další sloupce zobrazíte posunutím tabulky doprava.</p>
+          <div class="table-scroll" tabindex="0" aria-label="Tabulka kampaní">
+            <table><thead><tr><th scope="col">Kampaň</th><th scope="col">Náklady</th><th scope="col">Poptávky</th><th scope="col">Kvalifikované</th><th scope="col">Podíl</th><th scope="col">Cena za poptávku</th><th scope="col">Cena za kvalifikovanou</th></tr></thead><tbody id="campaign-rows"></tbody></table>
+          </div>
+          <p class="table-foot">Výpočet zahrnuje poptávky vytvořené ve zvoleném období a přiřazené podle kanálu a ID kampaně. Kvalifikace vychází ze stavu v exportu CRM.</p>
+        </section>
+      </section>
+
+      <section id="import" class="view" aria-labelledby="import-title" hidden>
+        <header class="page-head"><h1 id="import-title">Import dat</h1></header>
+        <form id="import-form">
+          <div class="import-grid">
+            <section class="card file-card" aria-labelledby="spend-title">
+              <h2 id="spend-title">Reklamní výdaje</h2><p>Jeden součet v Kč pro každou kampaň, kanál a den.</p>
+              <label class="file-label" for="file-spend">CSV s náklady</label><input type="file" id="file-spend" accept=".csv,.tsv,text/csv,text/tab-separated-values">
+              <p id="file-spend-info" class="file-info" aria-live="polite"></p><div id="map-spend" class="mapping"></div>
+            </section>
+            <section class="card file-card" aria-labelledby="leads-import-title">
+              <h2 id="leads-import-title">CRM poptávky</h2><p>Jeden aktuální stav pro každé ID poptávky.</p>
+              <label class="file-label" for="file-leads">CSV z CRM</label><input type="file" id="file-leads" accept=".csv,.tsv,text/csv,text/tab-separated-values">
+              <p id="file-leads-info" class="file-info" aria-live="polite"></p><div id="map-leads" class="mapping"></div>
+            </section>
+          </div>
+          <section class="card file-card import-settings" aria-labelledby="rules-title">
+            <h2 id="rules-title">Pravidla výpočtu</h2>
+            <label for="qualified-states" class="file-label">Stavy započítané jako kvalifikované</label>
+            <input id="qualified-states" type="text" value="Kvalifikovaná; Qualified" aria-describedby="status-help" required>
+            <p id="status-help">Použijte názvy stavů z CRM. Více hodnot oddělte středníkem.</p>
+            <label class="check-label"><input id="confirm-czk" type="checkbox" required><span>Potvrzuji, že výdaje jsou v Kč.</span></label>
+            <p id="import-confirmation" class="import-confirmation" role="status" hidden>Náhled je připravený. Před použitím potvrďte měnu výdajů.</p>
+            <p>Nový import nahradí otevřený dataset. Identické řádky započítáme jednou. Rozporné řádky je třeba v exportu opravit.</p>
+            <p id="import-error" class="form-error" role="alert" hidden></p>
+            <section id="import-preview" aria-label="Náhled importu" hidden></section>
+            <div class="actions"><button id="preview-files" class="button secondary" type="button">Zkontrolovat import</button><button id="use-files" class="button primary" type="submit" disabled>Použít data</button></div>
+          </section>
+        </form>
+        <section class="card templates file-card" aria-labelledby="templates-title">
+          <h2 id="templates-title">Export aktuálních dat</h2>
+          <div class="actions"><button class="button secondary" data-export-input="spend" type="button">Výdaje CSV</button><button class="button secondary" data-export-input="leads" type="button">Poptávky CSV</button></div>
+        </section>
+      </section>
+
+      <section id="leads" class="view" aria-labelledby="leads-title" hidden>
+        <header class="page-head"><div><h1 id="leads-title">Poptávky</h1><p id="leads-period">Detail podkladů pro výpočet.</p></div><a class="button secondary" href="#report">Přehled kampaní</a></header>
+        <!-- fixtures:start -->
+        <section id="journey" class="card flow-overview journey" aria-labelledby="journey-title" hidden>
+          <h2 id="journey-title">Cesta poptávky</h2><p>Rezidence Na Stráni · QA-SCENAR-01</p>
+          <ol id="journey-steps" class="journey-steps"></ol>
+          <p id="journey-note"></p>
+          <div class="actions"><button id="journey-next" class="button primary" type="button"></button><a id="journey-portal" class="button secondary" href="#investor" hidden>Otevřít portál investora</a></div>
+        </section>
+        <!-- fixtures:end -->
+        <div class="card leads-card">
+          <div class="lead-filters">
+            <label>Kampaň <select id="filter-campaign"></select></label>
+            <label>Stav dat <select id="filter-issue"><option value="all">Všechny poptávky</option><option value="issue">Jen nepřiřazené</option><option value="matched">Jen přiřazené</option><option value="missing-key">Chybí kanál nebo ID</option><option value="missing-spend">Bez výdajů v období</option><option value="outside-period">Výdaje jsou v jiném období</option><option value="unknown-campaign">Kampaň ve výdajích chybí</option><option value="missing-status">Chybí stav CRM</option><option value="qualified">Kvalifikované</option><option value="handed-off">Předané klientovi</option></select></label>
+            <label>ID poptávky <span class="search-field"><input id="filter-search" type="search" placeholder="Hledat ID…"></span></label>
+          </div>
+          <p class="scroll-hint">Další sloupce zobrazíte posunutím tabulky doprava.</p>
+          <div class="table-scroll" tabindex="0" aria-label="Tabulka poptávek">
+            <table><thead><tr><th scope="col">ID poptávky</th><th scope="col">Datum vzniku</th><th scope="col">Kanál</th><th scope="col">ID kampaně</th><th scope="col">Stav CRM</th><th scope="col">Přiřazení</th><th scope="col">Akce</th></tr></thead><tbody id="lead-rows"></tbody></table>
+          </div>
+          <div class="pager"><span id="lead-count" aria-live="polite"></span><div class="actions"><button type="button" class="button secondary" id="page-prev">Předchozí</button><button type="button" class="button secondary" id="page-next">Další</button></div></div>
+        </div>
+      </section>
+      <!-- fixtures:start -->
+      <section id="investor" class="view" aria-labelledby="investor-title" hidden>
+        <header class="page-head"><h1 id="investor-title">Portál investora</h1><a class="button secondary route-back" href="#leads"><span class="back-mark" aria-hidden="true"></span>Zpět k poptávkám</a></header>
+        <dl class="investor-balance card"><div><dt>Hodnota portfolia</dt><dd>250 000 Kč</dd></div><div><dt>Aktivní pozice</dt><dd>1</dd></div><div><dt>Uložené příležitosti</dt><dd id="investor-saved-count">0</dd></div></dl>
+        <div class="summary-grid investor-grid">
+          <section class="card flow-overview" aria-labelledby="positions-title"><h2 id="positions-title">Moje portfolio</h2><div class="investor-item"><div><strong>Projekt Modrý Dvůr</strong><p>Splacení 30. 6. 2028</p></div><span>250 000 Kč</span></div></section>
+          <section class="card flow-overview" aria-labelledby="updates-title"><h2 id="updates-title">Komunikace</h2><ul id="investor-updates" class="detail-list"></ul></section>
+        </div>
+        <section class="card flow-overview" aria-labelledby="opportunities-title">
+          <div class="table-heading"><h2 id="opportunities-title">Příležitosti</h2><label>Zobrazit <select id="investor-filter"><option value="all">Všechny</option><option value="saved">Uložené</option></select></label></div>
+          <div id="investor-opportunities"></div>
+        </section>
+      </section>
+      <!-- fixtures:end -->
+    </div>
+  </main>
+  <dialog id="details" aria-labelledby="details-title">
+    <header class="dialog-head"><h2 id="details-title"></h2><form method="dialog"><button class="button secondary" type="submit">Zavřít</button></form></header>
+    <div id="details-body"></div>
+  </dialog>
+  <!-- scripts -->
+</body>
+</html>

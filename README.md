@@ -4,6 +4,8 @@ Pracovní prostor pro tým, který měří kampaně, kvalifikuje poptávky a nav
 
 [Veřejné demo](https://michalmachalik.github.io/Aardvarkland-LeadForce/) · [Produktová analýza](ANALYZA.md) · [Plán dalších vydání](ROADMAP.md)
 
+Samostatné ukázky se sestavují ze zdrojů v `standalone/`. [Audit kampaní](https://michalmachalik.github.io/Aardvarkland-LeadForce/audit-kampani/) · [Kontrola před spuštěním](https://michalmachalik.github.io/Aardvarkland-LeadForce/kontrola-pred-spustenim/) · [Portál investora](https://michalmachalik.github.io/Aardvarkland-LeadForce/portal-investora/)
+
 ## Veřejné demo
 
 Vyberte jednu ze šesti rolí. Volba **Otevřít další roli** otevře nový panel. Každý panel má vlastní přihlášení a uživatelé ve stejném prohlížeči pracují nad společnými záznamy. Údaje i změny se ukládají v tomto profilu prohlížeče, kde přežijí obnovení stránky. Další návštěvníci mají vlastní prostor. Na přihlašovací stránce lze obnovit výchozí data.
@@ -29,6 +31,15 @@ Report počítá evidovaný výdaj v Kč dělený počtem skutečných předán�
 
 Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí roli **Klient** a konkrétního klienta. Všichni pozvaní uživatelé tohoto klienta uvidí stejný přehled. Výběr kampaně ani export nezpřístupňuje záznamy jiného klienta.
 
+### Pilot importu Google Ads
+
+1. V roli **Marketing** otevřete **Klienti a kampaně**. Pod **Import Google Ads** je připravená kampaň **Byty pod Lípou**.
+2. Ponechte tři poslední uzavřené dny a scénář **Chybějící den**. **Synchronizovat náklady** automaticky zpracuje simulovanou odpověď. Objeví se dva nové dny včetně potvrzené nuly a jeden nevykázaný den.
+3. Opakujte stejný import. Nové i opravené záznamy zůstanou na nule. Zvolte **Doplněná data** pro obnovu chybějícího dne nebo **Opravený náklad** pro změnu již zpracované částky.
+4. V roli **Klient** si obnovte přehled. U nevykázaného dne má report poznámku a cena za předání se dopočítá po doplnění. Poslední známý náklad zůstane v evidenci i při opětovném vynechání dne.
+
+Import mapuje konkrétní účet a kampaň, čte denní `metrics.cost_micros` a částky převádí na haléře. Pro jeden den použije poslední známý importovaný náklad nebo případný ruční podklad. Opakovaná odpověď nenavyšuje výdaje. Zcela chybějící řádek je nevykázaný den. Google Ads může nulové řádky vynechat, proto takový den zůstává otevřený k ověření. [Google Ads – denní segmentace a nulové metriky](https://developers.google.com/google-ads/api/docs/reporting/zero-metrics)
+
 ## Spuštění čisté verze
 
 Po instalaci Node.js 24 nebo novější spusťte nastavení a aplikaci v interaktivním terminálu.
@@ -49,6 +60,18 @@ Nastavení se zeptá na název a identifikátor organizace, jméno a e-mail spr�
 Služba poslouchá pouze na `127.0.0.1`. Pro nasazení potřebuje vlastní HTTPS doménu, reverzní proxy, trvalý disk a spravovaný proces. Proxy musí předávat hlavičku `Origin` a měla by samostatně omezovat počet požadavků na přihlašovací trasy. Aplikace omezuje pokusy podle bezprostředního síťového protějšku, který je při tomto nasazení proxy. Endpoint `/health` slouží ke kontrole běžícího HTTP procesu.
 
 Při zálohování po korektním zastavení služby zkopírujte databázi a případné související soubory WAL. Za běhu použijte nástroj, který zálohuje konzistentní SQLite snímek. Ověřte obnovu na odděleném serveru. Přístup k datovému adresáři, zálohám a propojeným nástrojům svěřte jen oprávněným uživatelům. Importované soubory pracují v oddělených nástrojích v prohlížeči.
+
+### Zapnutí serverového zdroje
+
+Google Ads se zapíná nastavením prostředí serveru. Použijte `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` a `GOOGLE_ADS_REFRESH_TOKEN`. Pro správcovský účet lze doplnit `GOOGLE_ADS_LOGIN_CUSTOMER_ID` bez pomlček. `GOOGLE_ADS_API_VERSION` standardně používá `v26`. Pilot podporuje účty v CZK a časové pásmo Europe/Prague. Služba používá přístupy k načtení metadat účtu a čísel kampaní. [Příklad dotazu Google Ads API](https://developers.google.com/google-ads/api/docs/reporting/example)
+
+V **Klienti a kampaně** vyberte Google Ads kampaň a přes **Napojit kampaň** přiřaďte ID účtu a ID reklamy. Synchronizaci lze vyvolat z rozhraní, případně stejný import opakovat z plánovače serveru.
+
+```powershell
+npm run sync:google-ads -- identifikator-organizace
+```
+
+Bez zadaného období příkaz načítá posledních sedm uzavřených dnů. Volitelně přidejte dvě data ve formátu `RRRR-MM-DD` pro zpětné doplnění až 31 dnů. Příkaz vyžaduje stejnou cestu k databázi jako služba. Vrací chybu při nedostupnosti zdroje nebo nevykázaném dni. Připojení ke skutečnému účtu vyžaduje nasazení a ověření jeho oprávnění.
 
 ## Ověření
 

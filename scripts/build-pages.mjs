@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { cp, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -10,7 +11,15 @@ const require = createRequire(import.meta.url);
 const sqliteDist = dirname(require.resolve('sql.js'));
 await mkdir(dist, { recursive: true });
 await cp(join(root, 'public'), dist, { recursive: true });
-await cp(join(root, 'tools'), join(dist, 'tools'), { recursive: true });
+for (const slug of ['audit-kampani', 'kontrola-pred-spustenim', 'portal-investora']) {
+  const source = join(root, 'standalone', slug);
+  execFileSync(process.execPath, [join(source, 'build.cjs')], { stdio: 'inherit' });
+  execFileSync(process.execPath, [join(source, 'build.cjs'), '--production'], { stdio: 'inherit' });
+  for (const [path, build] of [[join(dist, slug), 'dist'], [join(dist, 'tools', slug), 'dist-production']]) {
+    await mkdir(path, { recursive: true });
+    await copyFile(join(source, build, 'index.html'), join(path, 'index.html'));
+  }
+}
 
 const indexPath = join(dist, 'index.html');
 const index = await readFile(indexPath, 'utf8');

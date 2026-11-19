@@ -1,4 +1,5 @@
 import { reportDay } from './client-accounts.mjs';
+import { prepareExampleBinding } from './google-ads-example.mjs';
 
 export function populateExample(store, token) {
   const setup = store.bootstrap({
@@ -57,6 +58,7 @@ export function populateExample(store, token) {
   const profiles = Object.fromEntries([admin, members.marketing, members.agent, members.care, members.investor]
     .map(({ id, role, name }) => [role, { id, role, name }]));
   profiles.client = populateClientExample(store, token, admin.id, members.care.id);
+  prepareExampleBinding(store, profiles);
   return profiles;
 }
 export function populateClientExample(store, token, adminId, careId) {

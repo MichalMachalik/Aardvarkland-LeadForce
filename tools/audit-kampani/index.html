@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Yir2qFMgW95XPYisa1H8IsJ2gmD62lQJiV+M8zxk9Gs='; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sLxO7PQ+WqwjPNqk5zIUfh3QL9s3H9oAVnYWQkalqDM='; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="description" content="Audit nákladů a kvality poptávek z reklamních a CRM exportů.">
   <title>Audit kampaní</title>
   <!--
@@ -1157,8 +1157,8 @@ select.filter-select:has(option:checked:not([value="all"]):not([value=""])) { bo
   const range = (dates) => dates ? `${day(dates[0])}–${day(dates[1])}` : 'bez záznamů';
   const rate = (value) => value === null ? '—' : percent.format(value);
   const storage = () => { try { return window.sessionStorage; } catch { return null; } };
-  const hosted = location.origin === 'https://michalmachalik.github.io';
-  const portalUrl = 'https://michalmachalik.github.io/portal-investora/';
+  const hosted = ['https:', 'http:'].includes(location.protocol);
+  const portalUrl = '../portal-investora/index.html';
   const inputs = { spend: null, leads: null };
   const revisions = { spend: 0, leads: 0 };
   const views = { report: 'Přehled kampaní', import: 'Import dat', leads: 'Poptávky' };

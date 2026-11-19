@@ -1,4 +1,5 @@
 import { clientAccounts, reportDay } from './client-accounts.mjs';
+import { googleAdsStore } from './google-ads-store.mjs';
 import { initializeSchema } from './schema.mjs';
 import { amount, campaignCode, csv, Failure, day, email, id, password, text, validToken } from './validation.mjs';
 
@@ -41,6 +42,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     run('INSERT INTO activity (workspace_id,actor_id,lead_id,action,detail,created_at) VALUES (?,?,?,?,?,?)',
       actor.workspace_id, actor.id, lead, action, detail, now());
   const clients = clientAccounts({ get, all, run, event, allow });
+  const googleAds = googleAdsStore({ get, all, run, event, allow, transaction });
   const publicActor = ({ id: userId, name, email: address, role, slug: org, workspace }) =>
     ({ id: userId, name, email: address, role, slug: org, workspace });
 
@@ -227,7 +229,10 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     const [scope, args] = leadScope(actor);
     const stagesInScope = all('SELECT l.stage,count(*) AS total FROM leads l LEFT JOIN users u ON u.id=l.owner_id AND u.workspace_id=l.workspace_id WHERE l.workspace_id=? ' + scope + ' GROUP BY l.stage', org, ...args);
     const result = { ...base, leads, stages: stagesInScope };
-    if (role === 'admin' || role === 'marketing') result.clientManagement = clients.management(actor);
+    if (role === 'admin' || role === 'marketing') {
+      result.clientManagement = clients.management(actor);
+      result.googleAds = googleAds.management(actor);
+    }
     if (role === 'marketing') return result;
     result.notifications = notifications(actor);
     result.tasks = all('SELECT t.*,l.name AS lead,u.name AS owner FROM tasks t JOIN leads l ON l.id=t.lead_id JOIN users u ON u.id=t.owner_id WHERE t.workspace_id=? AND (?=1 OR t.owner_id=?) ORDER BY t.done_at IS NOT NULL,t.due,t.id LIMIT 500',
@@ -249,6 +254,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
 
   const actions = {
     ...clients.actions,
+    'configure-google-ads': googleAds.configure,
     'create-lead'(actor, body) {
       allow(actor, 'admin', 'marketing');
       const name = text(body.name, 'Jméno', 120);
@@ -439,5 +445,5 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
   }
 
   return { upgraded, bootstrap, signIn, signOut, session, changePassword, claimInvite, state, leadDetail, command,
-    exportLeads, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'), createSession, close: () => db.close() };
+    exportLeads, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'), googleAds, createSession, close: () => db.close() };
 }

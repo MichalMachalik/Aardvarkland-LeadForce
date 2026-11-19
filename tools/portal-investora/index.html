@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Portfolio, harmonogram plateb, příležitosti a komunikace v Portálu investora.">
   <title>Portál investora</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-k5KtTNSwINmOcBsd+Rg1/JKoMlurI3EM9HqY052QYAU='; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-K2qo60j0o6cNBh0bQqxWwJ7jdhX+wnC78LwEjfTAD+c='; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <!--
 Portál investora
 Copyright 2026 Michal Machalik
@@ -1197,7 +1197,7 @@ select.filter-select:has(option:checked:not([value="all"]):not([value=""])) { bo
     option.disabled = caseStep < 2;
     if (caseStep < 2 && filter.value === 'case') filter.value = 'all';
     const back = $('case-back');
-    back.hidden = caseStep < 2 || location.origin !== 'https://michalmachalik.github.io';
+    back.hidden = caseStep < 2 || !['https:', 'http:'].includes(location.protocol);
     back.closest('.topbar').classList.toggle('topbar-return', !back.hidden);
   }
 

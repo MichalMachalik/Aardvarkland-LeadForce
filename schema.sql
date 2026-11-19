@@ -117,3 +117,28 @@ CREATE TABLE IF NOT EXISTS client_leads (
   FOREIGN KEY (workspace_id,campaign_id) REFERENCES client_campaigns(workspace_id,id)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS client_leads_reports ON client_leads(workspace_id,campaign_id,handed_day,lead_id);
+
+CREATE TABLE IF NOT EXISTS google_ads_campaigns (
+  workspace_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, customer_id TEXT NOT NULL, external_id TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0, last_run TEXT,
+  PRIMARY KEY (workspace_id,campaign_id),
+  UNIQUE (workspace_id,customer_id,external_id),
+  FOREIGN KEY (workspace_id,campaign_id) REFERENCES client_campaigns(workspace_id,id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS google_ads_days (
+  workspace_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, day TEXT NOT NULL,
+  cost_micros TEXT, cost_cents INTEGER CHECK (cost_cents BETWEEN 0 AND 100000000000),
+  missing INTEGER NOT NULL CHECK (missing IN (0,1)),
+  PRIMARY KEY (workspace_id,campaign_id,day),
+  FOREIGN KEY (workspace_id,campaign_id) REFERENCES google_ads_campaigns(workspace_id,campaign_id),
+  CHECK ((cost_micros IS NULL) = (cost_cents IS NULL))
+) STRICT;
+CREATE VIEW IF NOT EXISTS client_report_costs AS
+  SELECT manual.workspace_id,manual.campaign_id,manual.day,manual.cost_cents
+  FROM client_campaign_costs manual
+  WHERE NOT EXISTS (
+    SELECT 1 FROM google_ads_days ads WHERE ads.workspace_id=manual.workspace_id AND ads.campaign_id=manual.campaign_id
+      AND ads.day=manual.day AND ads.cost_cents IS NOT NULL
+  )
+  UNION ALL
+  SELECT workspace_id,campaign_id,day,cost_cents FROM google_ads_days WHERE cost_cents IS NOT NULL;

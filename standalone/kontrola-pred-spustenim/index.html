@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- security -->
+  <title>Kontrola před spuštěním</title>
+  <!-- styles -->
+</head>
+<body>
+  <aside class="sidebar" id="workspace-nav">
+    <a class="brand" href="#check"><span class="mark" aria-hidden="true"><span class="ui-icon icon-check"></span></span><span>Před spuštěním</span></a>
+    <nav class="primary-nav" aria-label="Hlavní nabídka">
+      <a href="#check" data-route="check"><span class="ui-icon icon-list" aria-hidden="true"></span><span class="nav-label">Kontrola odkazů</span><span class="nav-compact" aria-hidden="true">Kontrola</span></a>
+      <a href="#builder" data-route="builder"><span class="ui-icon icon-link" aria-hidden="true"></span><span>Tvůrce odkazu</span></a>
+      <a href="#crm" data-route="crm"><span class="ui-icon icon-record" aria-hidden="true"></span><span>Ověření CRM</span></a>
+    </nav>
+    <nav class="related-apps" aria-label="Související aplikace">
+      <a href="../audit-kampani/index.html" target="_blank" rel="noopener" title="Otevře se v nové kartě">Audit kampaní<span class="external-mark" aria-hidden="true"></span></a>
+    </nav>
+  </aside>
+  <main class="main">
+    <div class="topbar"><div class="topbar-left"><button id="nav-toggle" class="nav-toggle" type="button" aria-label="Skrýt navigaci" title="Skrýt navigaci" aria-controls="workspace-nav" aria-expanded="true" hidden><span class="panel-icon" aria-hidden="true"></span></button><span id="view-name">Kontrola odkazů</span><span class="mobile-product">Před spuštěním</span></div></div>
+    <div class="content">
+      <div class="status" id="app-status" role="status" hidden></div>
+      <section id="check" aria-labelledby="check-title">
+        <header class="page-head">
+          <h1 id="check-title" tabindex="-1">Kontrola před spuštěním</h1>
+          <div class="actions">
+            <button class="button secondary" id="new-check" type="button"><span class="ui-icon icon-plus" aria-hidden="true"></span>Nová kontrola</button>
+            <button class="button secondary result-jump" id="jump-results" type="button" hidden>Výsledky</button>
+          </div>
+        </header>
+        <form id="check-form" class="card input-card">
+          <div class="fields">
+            <label>Schválené domény <input id="host" autocomplete="off" spellcheck="false" required aria-describedby="domains-hint"></label>
+            <label>Povolené zdroje <input id="sources" autocomplete="off" spellcheck="false" required aria-describedby="domains-hint"></label>
+            <label>Povolená média <input id="media" autocomplete="off" spellcheck="false" required aria-describedby="domains-hint"></label>
+          </div>
+          <p class="config-hint" id="domains-hint">Domény, zdroje a média oddělujte čárkou.</p>
+          <label for="links" class="field-label">Adresy kampaní</label>
+          <textarea id="links" rows="6" required spellcheck="false" aria-describedby="links-hint" maxlength="500000"></textarea>
+          <div class="input-actions"><p id="links-hint">Jeden odkaz na řádek.</p><button class="button primary" type="submit"><span class="ui-icon icon-check" aria-hidden="true"></span>Zkontrolovat odkazy</button></div>
+          <p class="form-error" id="scan-error" role="alert" hidden></p>
+        </form>
+        <section class="results" aria-labelledby="results-title">
+          <header class="page-head result-head">
+            <div><h2 id="results-title" tabindex="-1">Výsledky kontroly</h2><p id="counts" aria-live="polite"></p></div>
+            <button class="button secondary" id="save-check" type="button"><span class="ui-icon icon-download" aria-hidden="true"></span>Stáhnout CSV</button>
+          </header>
+          <div class="results-filters" id="results-filters" hidden>
+            <label class="visually-hidden" for="result-search">Vyhledat odkaz</label><span class="search-field"><input id="result-search" type="search" placeholder="Hledat URL nebo ID…"></span>
+            <label class="visually-hidden" for="result-source">Kanál odkazu</label><select id="result-source" class="filter-select"></select>
+            <label class="visually-hidden" for="result-filter">Filtrovat odkazy</label><select id="result-filter" class="filter-select"><option value="all">Všechny stavy</option><option value="issues">K úpravě</option><option value="ready">Bez chyb</option><option value="conflict">Konflikty označení</option></select>
+            <span id="visible-count" aria-live="polite" hidden></span>
+          </div>
+          <div class="card filter-empty" id="results-empty" hidden><p>Filtru neodpovídá žádný odkaz.</p><button class="button secondary" id="clear-result-filters" type="button">Vymazat filtry</button></div>
+          <div class="result-list" id="result-list"></div>
+        </section>
+      </section>
+      <section id="builder" aria-labelledby="builder-title" hidden>
+        <header class="page-head"><h1 id="builder-title" tabindex="-1">Tvůrce odkazu</h1><button class="button secondary" id="new-link" type="button">Nový odkaz</button></header>
+        <form id="builder-form" class="card input-card">
+          <label class="preset-label">Předvolba kanálu <select id="channel-template"><option value="">Vlastní nastavení</option><option value="google">Google Ads</option><option value="meta">Meta</option><option value="linkedin">LinkedIn</option><option value="sklik">Sklik</option><option value="vlastni">Vlastní kanál</option></select></label>
+          <label>Cílová HTTPS adresa <input id="base-url" type="url" autocomplete="off" spellcheck="false" required></label>
+          <div class="fields builder-fields">
+            <label>Zdroj <input id="utm_source" required autocomplete="off" spellcheck="false"></label>
+            <label>Médium <input id="utm_medium" required autocomplete="off" spellcheck="false"></label>
+            <label>Název kampaně <input id="utm_campaign" required autocomplete="off"></label>
+            <label>ID kampaně <input id="utm_id" required autocomplete="off" spellcheck="false"></label>
+            <label>Varianta reklamy <input id="utm_content" autocomplete="off"></label>
+            <label>Klíčové slovo <input id="utm_term" autocomplete="off"></label>
+          </div>
+          <p class="form-error" id="builder-error" role="alert" hidden></p>
+          <div class="input-actions"><p id="editing" hidden></p><button class="button primary" id="builder-submit" type="submit">Vytvořit odkaz</button></div>
+        </form>
+        <section id="generated-section" class="card input-card" aria-labelledby="generated-title" hidden>
+          <h2 id="generated-title">Připravený odkaz</h2>
+          <textarea id="generated" rows="3" readonly aria-label="Připravený odkaz"></textarea>
+          <div class="actions"><button class="button secondary" id="copy-link" type="button">Zkopírovat</button><button class="button primary" id="add-link" type="button">Přidat do kontroly</button></div>
+        </section>
+      </section>
+      <section id="crm" aria-labelledby="crm-title" hidden>
+        <header class="page-head"><h1 id="crm-title" tabindex="-1">Ověření předání do CRM</h1><a class="button secondary" href="#check">Vybrat odkaz</a></header>
+        <section class="card input-card" aria-labelledby="conversion-title">
+          <h2 id="conversion-title">Poptávka</h2>
+          <p id="conversion-context">Vyberte připravený odkaz v Kontrole odkazů.</p>
+          <div id="conversion-values" class="values" hidden></div>
+          <section id="visit-panel" class="visit-panel" aria-labelledby="visit-title" hidden>
+            <h3 id="visit-title">Průběh návštěvy</h3>
+            <ol id="visit-events"></ol>
+            <button class="button secondary" id="visit-detail" type="button">Otevřít detail projektu</button>
+          </section>
+          <form id="crm-form" class="crm-preview" hidden>
+            <div class="crm-field"><label for="lead-topic">Téma</label><select id="lead-topic"><option>Prohlídka</option><option>Informace o projektu</option></select></div>
+            <div class="crm-field"><label for="visitor-id">Návštěvník</label><select id="visitor-id"><option value="new">Nový návštěvník</option><option value="existing">Známý kontakt</option></select></div>
+            <div class="actions"><button class="button primary" id="record-lead" type="submit" disabled>Ověřit přenos</button></div>
+          </form>
+          <p id="identity" class="identity" hidden></p>
+          <p class="crm-verified" id="crm-verified" role="status" hidden></p>
+          <div class="actions" id="handoff-actions" hidden><button class="button primary" id="handoff" type="button">Otevřít v Auditu</button></div>
+          <p id="handoff-hint" hidden>Stáhněte CRM CSV pro import do Auditu kampaní.</p>
+        </section>
+        <section class="card input-card" aria-labelledby="log-title">
+          <div class="page-head log-head"><h2 id="log-title">Záznamy CRM</h2><button class="button secondary" id="save-crm" type="button" disabled>Stáhnout CRM CSV</button></div>
+          <div class="table-scroll" tabindex="0" aria-label="Tabulka záznamů CRM">
+            <table><thead><tr><th scope="col">ID poptávky</th><th scope="col">Datum</th><th scope="col">Zdroj</th><th scope="col">ID kampaně</th><th scope="col">Stav</th></tr></thead><tbody id="crm-rows"></tbody></table>
+          </div>
+        </section>
+      </section>
+    </div>
+  </main>
+  <!-- scripts -->
+</body>
+</html>

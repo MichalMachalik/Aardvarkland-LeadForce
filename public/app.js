@@ -13,6 +13,7 @@ const events = {
   message_drafted: 'Koncept zprávy', message_published: 'Zveřejnění zprávy', password_changed: 'Změna hesla',
   client_created: 'Založení klienta', campaign_created: 'Založení kampaně', campaign_cost_saved: 'Změna nákladu kampaně',
   campaign_attached: 'Přiřazení klientské kampaně',
+  google_ads_configured: 'Napojení kampaně Google Ads', google_ads_sync: 'Synchronizace Google Ads',
 };
 const available = {
   admin: ['prehled', 'poptavky', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
@@ -41,6 +42,7 @@ let state;
 let renderNumber = 0;
 let busy = false;
 let clientQuery = '';
+let adsFormValues = {};
 
 function node(tag, attrs, ...children) {
   const el = document.createElement(tag);
@@ -193,6 +195,11 @@ function loginScreen(invitation) {
       }))))));
   }
   login.append(node('section', { className: 'card' }, form(invitation ? 'Založit účet' : 'Přihlásit se', fields, submit)));
+  if (browserDemo && !invitation) login.append(card('Samostatné nástroje', actions(
+    link('Audit kampaní', './audit-kampani/', { className: 'button secondary' }),
+    link('Kontrola odkazů', './kontrola-pred-spustenim/', { className: 'button secondary' }),
+    link('Portál investora', './portal-investora/', { className: 'button secondary' }),
+  )));
   if (browserDemo && !invitation) login.append(actionButton('Obnovit výchozí data', () => {
     if (!window.confirm('Zahodit změny této ukázky v prohlížeči?')) return;
     return run(async () => {
@@ -389,11 +396,66 @@ function users() {
 
 const campaignOptions = (items) => items.map((item) => [item.id, item.name + ' · ' + item.code + (item.client ? ' · ' + item.client : '')]);
 
+function googleAdsPanel(campaigns) {
+  const eligible = campaigns.filter((row) => row.source.toLowerCase() === 'google ads');
+  const connections = state.googleAds;
+  const connected = eligible.filter((row) => connections.some((item) => item.campaign_id === row.id));
+  const configurable = eligible.filter((row) => !connections.some((item) => item.campaign_id === row.id && item.last_run));
+  if (!eligible.length) return null;
+  const mode = config.googleAds;
+  const dayAgo = (count) => new Date(Date.parse(reportDate()) - count * 86_400_000).toISOString().slice(0, 10);
+  const range = [
+    field('Import od', 'from', 'date', { value: adsFormValues.from ?? dayAgo(mode === 'demo' ? 3 : 7), max: dayAgo(1) }),
+    field('Import do', 'to', 'date', { value: adsFormValues.to ?? dayAgo(1), max: dayAgo(1) }),
+  ];
+  const syncFields = [field('Napojená kampaň', 'campaign', campaignOptions(connected)), ...range];
+  syncFields[0].querySelector('select').value = adsFormValues.campaign ?? connected[0]?.id ?? '';
+  if (mode === 'demo') {
+    const scenario = field('Scénář zdroje', 'scenario', [
+      ['gap', 'Chybějící den'], ['complete', 'Doplněná data'], ['correction', 'Opravený náklad'],
+    ]);
+    scenario.querySelector('select').value = adsFormValues.scenario ?? 'gap';
+    syncFields.push(scenario);
+  }
+  const imports = connected.map((item) => {
+    const entry = connections.find((row) => row.campaign_id === item.id);
+    const last = entry.last_run;
+    return node('section', { className: 'sync-result', 'aria-label': 'Výsledek importu ' + item.name },
+      node('h3', {}, item.name),
+      node('p', { className: 'muted' }, entry.customer_id + ' · ' + entry.external_id),
+      last ? [
+        node('p', {}, formatDate(last.from) + ' až ' + formatDate(last.to)),
+        node('ul', { className: 'sync-counts' }, [
+          ['Nové', last.added], ['Opravené', last.updated], ['Beze změny', last.unchanged],
+          ['Potvrzená nula', last.zero], ['Chybějící dny', last.missing.length],
+        ].map(([label, value]) => node('li', {}, label + ' ', node('strong', {}, String(value))))),
+        last.missing.length ? node('p', { className: 'muted' }, 'Nevykázané dny ' + last.missing.map(formatDate).join(', ')) : null,
+        last.retained ? node('p', { className: 'muted' }, 'U některých dnů zůstává poslední známý náklad.') : null,
+      ] : empty('Čeká na první import.'));
+  });
+  return card('Import Google Ads', [
+    mode === 'demo' ? node('p', { className: 'muted report-note' }, 'Simulovaný zdroj s fiktivními výdaji.') : null,
+    mode && connected.length ? form('Synchronizovat náklady', syncFields, (data) => {
+      adsFormValues = data;
+      return command('sync-google-ads', data, 'Synchronizace dokončena.');
+    }) : null,
+    !mode ? empty('Synchronizace čeká na konfiguraci zdroje na serveru.') : null,
+    imports,
+    configurable.length ? node('details', { className: 'sync-config' }, node('summary', {}, 'Napojit kampaň'),
+      form('Uložit napojení', [
+        field('Kampaň Google Ads', 'campaign', campaignOptions(configurable)),
+        field('ID účtu Google Ads', 'customer', 'text', { inputmode: 'numeric', maxlength: 12 }),
+        field('ID kampaně Google Ads', 'external', 'text', { inputmode: 'numeric', maxlength: 19 }),
+      ], (data) => command('configure-google-ads', data, 'Napojení uloženo.'))) : null,
+  ]);
+}
+
 function campaignManagement() {
   const { clients, campaigns, recentCosts } = state.clientManagement;
   const output = [heading('Klienti a kampaně'),
+    googleAdsPanel(campaigns),
     card('Kampaně', table(['Klient', 'Kampaň', 'Projekt', 'Kanál', 'ID kampaně'],
-      campaigns.map((item) => [item.client, item.name, item.project, item.source, item.code]), 'Zatím žádné klientské kampaně.'))];
+      campaigns.map((item) => [item.client, item.name, item.project, item.source, item.code]), 'Zatím žádné klientské kampaně.'))].filter(Boolean);
   if (state.user.role === 'admin') output.push(card('Klienti', [
     table(['Klient'], clients.map(({ name }) => [name]), 'Zatím žádní klienti.'),
     form('Přidat klienta', [field('Jméno klienta', 'name', 'text', { maxlength: 120 })], (data) => command('create-client', data)),
@@ -452,11 +514,13 @@ async function clientOverview() {
     ], (data) => update(new URLSearchParams(data)))),
     card('Výkon kampaní', [
       table(['Kampaň', 'Kanál', 'Evidovaný náklad', 'Předáno', 'Náklad na předání'], report.campaigns.map((row) => [
-        node('span', {}, node('strong', {}, row.name), node('small', { className: 'line-meta' }, row.code)),
+        node('span', {}, node('strong', {}, row.name), node('small', { className: 'line-meta' }, row.code),
+          row.import_missing ? node('small', { className: 'line-meta' }, 'Chybějící dny Google Ads ' + row.import_missing) : null),
         row.source, czk(row.cost_cents, 'Bez evidence'), String(row.handed), czk(row.unit_cents),
       ]), 'V účtu zatím nejsou kampaně.'),
       node('p', { className: 'muted report-note' }, 'Náklad na předání vychází z výdajů a předání ve zvoleném období.'),
       report.totals.missing_cost ? node('p', { className: 'muted report-note' }, 'U některé kampaně s předáním chybí evidence nákladů.') : null,
+      report.import_missing ? node('p', { className: 'muted report-note' }, 'Google Ads má ve zvoleném období nevykázané dny. U dotčených kampaní a v souhrnu je cena za předání dočasně prázdná.') : null,
       actions(csvLink('Stáhnout report CSV', '/api/client/report.csv?' + query, 'kampane.csv')),
     ]),
     card('Předané poptávky', [
@@ -583,6 +647,7 @@ $('logout').addEventListener('click', () => void run(async () => {
   await api('/api/logout', {});
   state = undefined;
   clientQuery = '';
+  adsFormValues = {};
   document.body.classList.remove('menu-open');
   $('menu-toggle').setAttribute('aria-expanded', 'false');
   history.replaceState(null, '', location.pathname);
