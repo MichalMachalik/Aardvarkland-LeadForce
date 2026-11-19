@@ -103,6 +103,9 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
 
     if (req.method === 'GET') {
       if (pathname === '/api/state') return json(res, 200, store.state(actor));
+      if (pathname === '/api/handoffs') return json(res, 200, store.handoffInbox(actor, searchParams));
+      const delivered = /^\/api\/handoffs\/(\d+)$/.exec(pathname);
+      if (delivered) return json(res, 200, store.handoffDetail(actor, delivered[1]));
       if (pathname === '/api/client/report') return json(res, 200, store.clientReport(actor, searchParams));
       if (pathname === '/api/client/report.csv') return send(res, 200, store.clientReport(actor, searchParams, true), {
         'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="kampane.csv"',

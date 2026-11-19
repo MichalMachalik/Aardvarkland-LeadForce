@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -276,6 +277,116 @@ test('client report counts scoped handoffs and exact campaign costs, including c
     assert.equal(paginated.pages, 2);
     assert.equal(paginated.page, 2);
     assert.equal(paginated.deliveries.length, 2);
+    assert.deepEqual(loggedErrors, []);
+  } finally {
+    await close();
+  }
+});
+
+test('handoff confirmation and complaints respect client, care and organisation scope and preserve the delivery', async () => {
+  const { store, request, session, state, change, invite, close, loggedErrors } = await openApi();
+  const detail = async (actor, id, want = 200) => (await request('/api/handoffs/' + id, { ...actor, want })).data;
+  const inbox = async (actor, filter = '', want = 200) => (await request('/api/handoffs' + filter, { ...actor, want })).data;
+  try {
+    store.bootstrap(alpha);
+    store.bootstrap(beta);
+    const admin = await session(await request('/api/login', { body: alpha }));
+    const otherAdmin = await session(await request('/api/login', { body: beta }));
+    assert.deepEqual((await state(admin)).handoffSummary, { total: 0, confirmed: 0, active: 0 });
+    assert.deepEqual((await inbox(admin, '?status=all')).rows, []);
+    const client = (await change(admin, 'create-client', { name: 'Kupující A' })).id;
+    const otherClient = (await change(admin, 'create-client', { name: 'Kupující B' })).id;
+    const outside = (await change(otherAdmin, 'create-client', { name: 'Kupující C' })).id;
+    const viewer = await invite(admin, 'prijemce', 'client', client);
+    const neighbour = await invite(admin, 'jiny-prijemce', 'client', otherClient);
+    const outsider = await invite(otherAdmin, 'cizi-prijemce', 'client', outside);
+    const care = await invite(admin, 'pece', 'care');
+    const otherCare = await invite(admin, 'jina-pece', 'care');
+    const marketing = await invite(admin, 'obchod', 'marketing');
+    const campaign = (await change(admin, 'create-campaign', { client, name: 'Testovací kampaň',
+      project: 'Projekt A', source: 'Google Ads', code: 'ACK-1' })).id;
+    const lead = (await change(admin, 'create-lead', { name: 'Předávaný kontakt', email: 'kontakt@a.example',
+      client_campaign: campaign })).id;
+    const pending = (await change(admin, 'create-lead', { name: 'Rozpracovaný kontakt', email: 'nesdileno@a.example',
+      client_campaign: campaign })).id;
+    await detail(viewer, lead, 404);
+    await change(viewer, 'confirm-handoff', { id: lead }, 404);
+    await change(admin, 'save-campaign-cost', { campaign, day: reportDay(), cost: '1200' });
+    await change(admin, 'change-stage', { id: lead, version: 1, stage: 'contacted' });
+    await change(admin, 'change-stage', { id: lead, version: 2, stage: 'qualified' });
+    await change(admin, 'assign', { id: lead, version: 3, owner: care.user.id });
+    await change(care, 'add-note', { id: lead, body: 'Interní komentář pro tým.' });
+    await change(care, 'change-stage', { id: lead, version: 4, stage: 'handed' });
+    await change(care, 'change-stage', { id: lead, version: 5, stage: 'closed' });
+    await detail({}, lead, 401);
+    await detail(neighbour, lead, 404);
+    await detail(outsider, lead, 404);
+    await detail(otherAdmin, lead, 404);
+    await detail(otherCare, lead, 404);
+    await detail(marketing, lead, 403);
+    await detail(viewer, pending, 404);
+    await inbox(viewer, '', 403);
+    await inbox(marketing, '', 403);
+    await inbox(care, '?status=absent', 422);
+    await change(care, 'confirm-handoff', { id: lead }, 403);
+    await change(neighbour, 'confirm-handoff', { id: lead }, 404);
+    await change({ ...viewer, csrf: undefined }, 'confirm-handoff', { id: lead }, 403);
+    await change(viewer, 'confirm-handoff', { id: lead });
+    const receipt = (await detail(viewer, lead)).delivery.confirmed_at;
+    assert.ok(receipt);
+    await change(viewer, 'confirm-handoff', { id: lead });
+    assert.equal((await detail(care, lead)).delivery.confirmed_at, receipt);
+    assert.equal((await inbox(care, '?status=confirmed')).rows[0].id, lead);
+    assert.deepEqual((await state(care)).handoffSummary, { total: 1, confirmed: 1, active: 0 });
+    assert.equal((await state(admin)).activity.filter((row) => row.action === 'handoff_confirmed').length, 1);
+
+    const complaint = { id: lead, reason: 'invalid_contact', description: 'Nesouhlasí telefonní číslo.', request_key: randomUUID() };
+    await change(outsider, 'file-handoff-claim', complaint, 404);
+    await change(marketing, 'file-handoff-claim', complaint, 403);
+    await change(viewer, 'file-handoff-claim', { ...complaint, id: pending }, 404);
+    await change(viewer, 'file-handoff-claim', { ...complaint, reason: 'missing' }, 422);
+    await change(viewer, 'file-handoff-claim', { ...complaint, reason: 'other', description: '' }, 422);
+    await change(viewer, 'file-handoff-claim', { ...complaint, request_key: 'bad' }, 422);
+    const filed = await change(viewer, 'file-handoff-claim', complaint);
+    assert.deepEqual(await change(viewer, 'file-handoff-claim', complaint), filed);
+    await change(viewer, 'file-handoff-claim', { ...complaint, description: 'Jiný obsah' }, 409);
+    await change(viewer, 'file-handoff-claim', { ...complaint, request_key: randomUUID() }, 409);
+    assert.equal((await inbox(care)).rows[0].claim_status, 'open');
+    assert.equal((await inbox(otherCare)).rows.length, 0);
+    assert.equal((await state(admin)).handoffSummary.active, 1);
+    const draft = { id: filed.id, version: 1, outcome: 'accepted', resolution: 'Údaje jsme zkontrolovali.' };
+    await change(viewer, 'review-handoff-claim', draft, 403);
+    await change(otherCare, 'review-handoff-claim', draft, 404);
+    await change(otherAdmin, 'review-handoff-claim', draft, 404);
+    await change(care, 'resolve-handoff-claim', draft, 409);
+    await change(care, 'review-handoff-claim', draft);
+    assert.equal((await detail(viewer, lead)).claims[0].status, 'review');
+    await change(care, 'resolve-handoff-claim', draft, 409);
+    await change(care, 'resolve-handoff-claim', { ...draft, version: 2, resolution: ' ' }, 422);
+    await change(care, 'resolve-handoff-claim', { ...draft, version: 2 });
+    await change(care, 'resolve-handoff-claim', { ...draft, version: 2 });
+    const received = await detail(viewer, lead);
+    assert.equal(received.claims[0].status, 'accepted');
+    assert.equal(received.claims[0].resolution, draft.resolution);
+    assert.equal(received.claims[0].reviewer_id, undefined);
+    assert.doesNotMatch(JSON.stringify(received), /Interní komentář/);
+    assert.equal((await inbox(care)).rows.length, 0);
+    assert.equal((await inbox(care, '?status=closed')).rows[0].claim_status, 'accepted');
+
+    const second = await change(viewer, 'file-handoff-claim', { ...complaint, reason: 'duplicate', request_key: randomUUID() });
+    await change(care, 'review-handoff-claim', { id: second.id, version: 1 });
+    await change(admin, 'user-status', { id: care.user.id, enabled: false });
+    await detail(care, lead, 401);
+    await change(otherCare, 'review-handoff-claim', { id: second.id, version: 2 });
+    await change(otherCare, 'resolve-handoff-claim', { id: second.id, version: 3, outcome: 'rejected', resolution: 'Kontakt patří k jinému projektu.' });
+    const history = (await detail(viewer, lead)).claims;
+    assert.deepEqual(history.map((row) => row.status), ['rejected', 'accepted']);
+    assert.equal((await state(admin)).activity.filter((row) => row.action === 'handoff_claim_accepted').length, 1);
+    const report = (await request('/api/client/report', viewer)).data;
+    assert.equal(report.deliveries[0].confirmed_at, receipt);
+    assert.equal(report.deliveries[0].claim_status, 'rejected');
+    assert.equal(report.totals.handed, 1);
+    assert.equal(report.totals.unit_cents, 120000);
     assert.deepEqual(loggedErrors, []);
   } finally {
     await close();

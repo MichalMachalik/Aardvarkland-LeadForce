@@ -92,9 +92,12 @@ export function clientAccounts({ get, all, run, event, allow }) {
     const importMissing = campaigns.reduce((sum, row) => sum + row.import_missing, 0);
     const pages = Math.max(1, Math.ceil(totalHanded / pageSize));
     const currentPage = Math.min(page, pages);
-    const deliveries = all(`SELECT l.id,l.name,l.email,l.handed_at,d.handed_day,c.name AS campaign,c.project,c.source,c.code
+    const deliveries = all(`SELECT l.id,l.name,l.email,l.handed_at,d.handed_day,c.name AS campaign,c.project,c.source,c.code,
+      r.confirmed_at,(SELECT q.status FROM handoff_claims q WHERE q.workspace_id=d.workspace_id AND q.lead_id=d.lead_id
+        ORDER BY q.id DESC LIMIT 1) AS claim_status
       FROM client_leads d JOIN leads l ON l.id=d.lead_id AND l.workspace_id=d.workspace_id
       JOIN client_campaigns c ON c.id=d.campaign_id AND c.workspace_id=d.workspace_id
+      LEFT JOIN handoff_receipts r ON r.workspace_id=d.workspace_id AND r.lead_id=d.lead_id
       WHERE c.workspace_id=? AND c.client_id=?` + selection + ` AND d.handed_day BETWEEN ? AND ?
       ORDER BY l.handed_at DESC,l.id DESC LIMIT ? OFFSET ?`,
     ...ids, from, to, pageSize, (currentPage - 1) * pageSize);

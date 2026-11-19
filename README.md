@@ -31,6 +31,15 @@ Report počítá evidovaný výdaj v Kč dělený počtem skutečných předán�
 
 Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí roli **Klient** a konkrétního klienta. Všichni pozvaní uživatelé tohoto klienta uvidí stejný přehled. Výběr kampaně ani export nezpřístupňuje záznamy jiného klienta.
 
+### Potvrzení převzetí a reklamace
+
+1. Jako **Klient** otevřete v tabulce **Předané poptávky** detail kontaktu **Zuzana Šedá**. Použijte **Potvrdit převzetí**.
+2. V detailu vyberte důvod reklamace a případně připište popis. Pro **Jiný důvod** je popis povinný. Podání se objeví v detailu klienta i ve frontě týmu.
+3. Jako **Péče** nebo **Správce** otevřete **Předání klientům**. Vyberte předání, převezměte reklamaci a uložte rozhodnutí s vyjádřením pro klienta. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
+4. Obnovte klientský detail. Uvidíte výsledek a vyjádření týmu. Volba **Zpět do přehledu** zachová předchozí filtr kampaně a období.
+
+Potvrzení je jednorázové. U jednoho předání může tým současně řešit jednu reklamaci. Další podání po vyřízení vytvoří nový případ a starší rozhodnutí zůstává v historii. V přehledu péče jsou předání tohoto pracovníka a případy bez aktivního vlastníka. Správce vidí předání v celé organizaci. Vyjádření k reklamaci je součást klientského detailu, interní poznámky CRM zůstávají v týmové evidenci. Původní datum a počet předání pro výpočet kampaní vycházejí ze skutečně evidovaného předání.
+
 ### Pilot importu Google Ads
 
 1. V roli **Marketing** otevřete **Klienti a kampaně**. Pod **Import Google Ads** je připravená kampaň **Byty pod Lípou**.

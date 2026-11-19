@@ -1,5 +1,6 @@
 import { clientAccounts, reportDay } from './client-accounts.mjs';
 import { googleAdsStore } from './google-ads-store.mjs';
+import { handoffFeedback } from './handoff-feedback.mjs';
 import { initializeSchema } from './schema.mjs';
 import { amount, campaignCode, csv, Failure, day, email, id, password, text, validToken } from './validation.mjs';
 
@@ -42,6 +43,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     run('INSERT INTO activity (workspace_id,actor_id,lead_id,action,detail,created_at) VALUES (?,?,?,?,?,?)',
       actor.workspace_id, actor.id, lead, action, detail, now());
   const clients = clientAccounts({ get, all, run, event, allow });
+  const feedback = handoffFeedback({ get, all, run, event, allow, clientName: clients.clientName });
   const googleAds = googleAdsStore({ get, all, run, event, allow, transaction });
   const publicActor = ({ id: userId, name, email: address, role, slug: org, workspace }) =>
     ({ id: userId, name, email: address, role, slug: org, workspace });
@@ -238,6 +240,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     result.tasks = all('SELECT t.*,l.name AS lead,u.name AS owner FROM tasks t JOIN leads l ON l.id=t.lead_id JOIN users u ON u.id=t.owner_id WHERE t.workspace_id=? AND (?=1 OR t.owner_id=?) ORDER BY t.done_at IS NOT NULL,t.due,t.id LIMIT 500',
       org, role === 'admin' ? 1 : 0, userId);
     if (role === 'admin' || role === 'care') {
+      result.handoffSummary = feedback.summary(actor);
       result.investors = all("SELECT id,name,email FROM users WHERE workspace_id=? AND role='investor' AND enabled=1 ORDER BY name", org);
       result.positions = all('SELECT p.*,u.name AS investor FROM positions p JOIN users u ON u.id=p.investor_id WHERE p.workspace_id=? ORDER BY p.id DESC LIMIT 500', org);
       result.messages = all('SELECT m.*,u.name AS investor FROM messages m JOIN users u ON u.id=m.investor_id WHERE m.workspace_id=? ORDER BY m.id DESC LIMIT 500', org);
@@ -254,6 +257,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
 
   const actions = {
     ...clients.actions,
+    ...feedback.actions,
     'configure-google-ads': googleAds.configure,
     'create-lead'(actor, body) {
       allow(actor, 'admin', 'marketing');
@@ -445,5 +449,8 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
   }
 
   return { upgraded, bootstrap, signIn, signOut, session, changePassword, claimInvite, state, leadDetail, command,
-    exportLeads, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'), googleAds, createSession, close: () => db.close() };
+    exportLeads, clientReport: (...args) => transaction(() => clients.report(...args), 'BEGIN'),
+    handoffInbox: (...args) => transaction(() => feedback.inbox(...args), 'BEGIN'),
+    handoffDetail: (...args) => transaction(() => feedback.details(...args), 'BEGIN'),
+    googleAds, createSession, close: () => db.close() };
 }

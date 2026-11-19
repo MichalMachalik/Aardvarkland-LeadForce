@@ -43,6 +43,9 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
   if (!actor) throw new Failure(401, 'Přihlaste se do pracovního prostoru.');
   if (method === 'GET') {
     if (path === '/api/state') return result(store.state(actor));
+    if (path === '/api/handoffs') return result(store.handoffInbox(actor, searchParams));
+    const delivery = /^\/api\/handoffs\/(\d+)$/.exec(path);
+    if (delivery) return result(store.handoffDetail(actor, delivery[1]));
     if (path === '/api/client/report') return result(store.clientReport(actor, searchParams));
     if (path === '/api/client/report.csv') return { ...result(store.clientReport(actor, searchParams, true)), contentType: 'text/csv; charset=utf-8' };
     if (path === '/api/export/leads.csv') return { ...result(store.exportLeads(actor)), contentType: 'text/csv; charset=utf-8' };

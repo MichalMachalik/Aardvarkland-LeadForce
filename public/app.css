@@ -122,6 +122,11 @@ select { appearance: none; padding-right: 1.65rem; background-image: linear-grad
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,11rem),1fr)); gap: .6rem .75rem; margin-bottom: .38rem; }
 .detail-grid dd { overflow-wrap: anywhere; }
 .detail > form, .detail > .actions, .detail > .button { margin-top: .7rem; }
+.handoff-detail > .actions, .claim-card > .actions { margin-top: .6rem; }
+.handoff-detail p, .claim-card p { margin: .6rem 0; }
+.claim-reason { font-weight: 650; }
+.claim-card h3 { margin: .8rem 0 .3rem; font-size: .9rem; }
+.claim-card .prose { overflow-wrap: anywhere; }
 .notes, .timeline { list-style: none; margin: 0; padding: 0; }
 .notes li, .timeline li { border-top: 1px solid var(--line); padding: .66rem 0; }
 .notes time { margin-left: .65rem; }

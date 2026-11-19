@@ -118,6 +118,30 @@ CREATE TABLE IF NOT EXISTS client_leads (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS client_leads_reports ON client_leads(workspace_id,campaign_id,handed_day,lead_id);
 
+CREATE TABLE IF NOT EXISTS handoff_receipts (
+  workspace_id INTEGER NOT NULL, lead_id INTEGER NOT NULL, confirmed_by INTEGER NOT NULL, confirmed_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id,lead_id),
+  FOREIGN KEY (workspace_id,lead_id) REFERENCES client_leads(workspace_id,lead_id),
+  FOREIGN KEY (workspace_id,confirmed_by) REFERENCES users(workspace_id,id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS handoff_claims (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, lead_id INTEGER NOT NULL,
+  request_key TEXT NOT NULL, filed_by INTEGER NOT NULL, filed_at TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('unreachable','invalid_contact','duplicate','out_of_scope','other')),
+  description TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','review','accepted','rejected')),
+  reviewed_by INTEGER, reviewed_at TEXT, resolved_by INTEGER, resolved_at TEXT, resolution TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (workspace_id,lead_id,request_key),
+  FOREIGN KEY (workspace_id,lead_id) REFERENCES client_leads(workspace_id,lead_id),
+  FOREIGN KEY (workspace_id,filed_by) REFERENCES users(workspace_id,id),
+  FOREIGN KEY (workspace_id,reviewed_by) REFERENCES users(workspace_id,id),
+  FOREIGN KEY (workspace_id,resolved_by) REFERENCES users(workspace_id,id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS handoff_claims_history ON handoff_claims(workspace_id,lead_id,id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS handoff_claims_one_active ON handoff_claims(workspace_id,lead_id)
+  WHERE status IN ('open','review');
+
 CREATE TABLE IF NOT EXISTS google_ads_campaigns (
   workspace_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, customer_id TEXT NOT NULL, external_id TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 0, last_run TEXT,
