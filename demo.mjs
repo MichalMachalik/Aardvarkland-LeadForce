@@ -59,11 +59,11 @@ export function populateExample(store, token) {
     .map(({ id, role, name }) => [role, { id, role, name }]));
   profiles.client = populateClientExample(store, token, admin.id, members.care.id);
   prepareExampleBinding(store, profiles);
-  prepareExampleFeedback(store, profiles.client.id);
+  prepareExampleFeedback(store, profiles.client.id, members.care);
   return profiles;
 }
 
-function prepareExampleFeedback(store, clientId) {
+function prepareExampleFeedback(store, clientId, care) {
   const session = store.createSession(clientId);
   try {
     const client = store.session(session);
@@ -71,10 +71,17 @@ function prepareExampleFeedback(store, clientId) {
     const received = delivered.find((lead) => lead.email === 'roman@leadforce.example');
     const duplicate = delivered.find((lead) => lead.email === 'hana@leadforce.example');
     if (received) store.command(client, 'confirm-handoff', { id: received.id });
-    if (duplicate) store.command(client, 'file-handoff-claim', {
-      id: duplicate.id, reason: 'duplicate', description: 'Stejný kontakt už máme v evidenci k Rezidenci U Háje.',
-      request_key: '7277fc78-0d24-4ac8-8ddd-efcacb54eba7',
-    });
+    if (duplicate) {
+      const { id } = store.command(client, 'file-handoff-claim', {
+        id: duplicate.id, reason: 'duplicate', description: 'Stejný kontakt už máme v evidenci k Rezidenci U Háje.',
+        request_key: '7277fc78-0d24-4ac8-8ddd-efcacb54eba7',
+      });
+      store.command(care, 'review-handoff-claim', { id, version: 1 });
+      store.command(care, 'request-claim-evidence', {
+        id, version: 2, request_key: 'a4089c00-6440-44aa-a022-1189d356fd57',
+        message: 'Doplňte prosím datum a referenci původního záznamu, ať oba kontakty porovnáme.',
+      });
+    }
   } finally {
     store.signOut(session);
   }

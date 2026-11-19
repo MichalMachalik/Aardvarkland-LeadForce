@@ -104,6 +104,8 @@ export function createWorkspaceServer(store, { origin, profiles = null, googleAd
     if (req.method === 'GET') {
       if (pathname === '/api/state') return json(res, 200, store.state(actor));
       if (pathname === '/api/handoffs') return json(res, 200, store.handoffInbox(actor, searchParams));
+      if (pathname === '/api/handoff-attention') return json(res, 200, store.handoffAttention(actor, searchParams));
+      if (pathname === '/api/handoff-attention/count') return json(res, 200, { count: store.handoffAttentionCount(actor) });
       const delivered = /^\/api\/handoffs\/(\d+)$/.exec(pathname);
       if (delivered) return json(res, 200, store.handoffDetail(actor, delivered[1]));
       if (pathname === '/api/client/report') return json(res, 200, store.clientReport(actor, searchParams));

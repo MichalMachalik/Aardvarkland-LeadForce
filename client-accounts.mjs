@@ -94,7 +94,9 @@ export function clientAccounts({ get, all, run, event, allow }) {
     const currentPage = Math.min(page, pages);
     const deliveries = all(`SELECT l.id,l.name,l.email,l.handed_at,d.handed_day,c.name AS campaign,c.project,c.source,c.code,
       r.confirmed_at,(SELECT q.status FROM handoff_claims q WHERE q.workspace_id=d.workspace_id AND q.lead_id=d.lead_id
-        ORDER BY q.id DESC LIMIT 1) AS claim_status
+        ORDER BY q.id DESC LIMIT 1) AS claim_status,
+      (SELECT m.kind FROM handoff_claims q JOIN handoff_claim_messages m ON m.workspace_id=q.workspace_id AND m.claim_id=q.id
+        WHERE q.workspace_id=d.workspace_id AND q.lead_id=d.lead_id AND q.status='review' ORDER BY m.id DESC LIMIT 1) AS claim_turn
       FROM client_leads d JOIN leads l ON l.id=d.lead_id AND l.workspace_id=d.workspace_id
       JOIN client_campaigns c ON c.id=d.campaign_id AND c.workspace_id=d.workspace_id
       LEFT JOIN handoff_receipts r ON r.workspace_id=d.workspace_id AND r.lead_id=d.lead_id

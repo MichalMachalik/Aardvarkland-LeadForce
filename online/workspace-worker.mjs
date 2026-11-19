@@ -44,6 +44,8 @@ function handle(store, profiles, { path: url, method, body, session, csrf }) {
   if (method === 'GET') {
     if (path === '/api/state') return result(store.state(actor));
     if (path === '/api/handoffs') return result(store.handoffInbox(actor, searchParams));
+    if (path === '/api/handoff-attention') return result(store.handoffAttention(actor, searchParams));
+    if (path === '/api/handoff-attention/count') return result({ count: store.handoffAttentionCount(actor) });
     const delivery = /^\/api\/handoffs\/(\d+)$/.exec(path);
     if (delivery) return result(store.handoffDetail(actor, delivery[1]));
     if (path === '/api/client/report') return result(store.clientReport(actor, searchParams));

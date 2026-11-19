@@ -35,8 +35,11 @@ Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí
 
 1. Jako **Klient** otevřete v tabulce **Předané poptávky** detail kontaktu **Zuzana Šedá**. Použijte **Potvrdit převzetí**.
 2. V detailu vyberte důvod reklamace a případně připište popis. Pro **Jiný důvod** je popis povinný. Podání se objeví v detailu klienta i ve frontě týmu.
-3. Jako **Péče** nebo **Správce** otevřete **Předání klientům**. Vyberte předání, převezměte reklamaci a uložte rozhodnutí s vyjádřením pro klienta. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
-4. Obnovte klientský detail. Uvidíte výsledek a vyjádření týmu. Volba **Zpět do přehledu** zachová předchozí filtr kampaně a období.
+3. Jako **Péče** nebo **Správce** otevřete **Čeká na reakci** a převezměte reklamaci. Tlačítkem **Vyžádat podklady** odešlete klientovi dotaz přímo ve vlákně.
+4. Jako **Klient** otevřete **Čeká na reakci**, vyberte případ a použijte **Doplnit podklady**. Na čerstvě otevřeném demu lze tenhle krok vyzkoušet rovnou u kontaktu **Hana Vítová**.
+5. Doplněný případ se vrátí do fronty týmu. Při potřebě dalších podkladů lze postup zopakovat. Po uložení rozhodnutí zůstává výsledek i celé vlákno v detailu. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
+
+Upozornění v aplikaci se zobrazuje klientovi u vyžádaných podkladů a týmu u nových reklamací nebo po doplnění podkladů. Počet se obnovuje při návratu na kartu a průběžně, když je karta otevřená. Obsah vlákna se načte znovu tlačítkem **Obnovit detail**.
 
 Potvrzení je jednorázové. U jednoho předání může tým současně řešit jednu reklamaci. Další podání po vyřízení vytvoří nový případ a starší rozhodnutí zůstává v historii. V přehledu péče jsou předání tohoto pracovníka a případy bez aktivního vlastníka. Správce vidí předání v celé organizaci. Vyjádření k reklamaci je součást klientského detailu, interní poznámky CRM zůstávají v týmové evidenci. Původní datum a počet předání pro výpočet kampaní vycházejí ze skutečně evidovaného předání.
 

@@ -127,6 +127,11 @@ select { appearance: none; padding-right: 1.65rem; background-image: linear-grad
 .claim-reason { font-weight: 650; }
 .claim-card h3 { margin: .8rem 0 .3rem; font-size: .9rem; }
 .claim-card .prose { overflow-wrap: anywhere; }
+.claim-thread { list-style: none; padding: 0; margin: .55rem 0 .85rem; }
+.claim-thread > li { padding: .65rem .75rem; background: var(--muted-surface); border-radius: var(--control); margin-bottom: .4rem; }
+.claim-thread p { margin: .35rem 0 0; }
+.attention-link { margin-bottom: .75rem; }
+.attention-count { margin-inline-start: auto; padding: .1rem .42rem; border-radius: 1rem; font-size: .76rem; background: #e4e9ed; color: #20252a; }
 .notes, .timeline { list-style: none; margin: 0; padding: 0; }
 .notes li, .timeline li { border-top: 1px solid var(--line); padding: .66rem 0; }
 .notes time { margin-left: .65rem; }

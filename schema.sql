@@ -141,6 +141,16 @@ CREATE TABLE IF NOT EXISTS handoff_claims (
 CREATE INDEX IF NOT EXISTS handoff_claims_history ON handoff_claims(workspace_id,lead_id,id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS handoff_claims_one_active ON handoff_claims(workspace_id,lead_id)
   WHERE status IN ('open','review');
+CREATE UNIQUE INDEX IF NOT EXISTS handoff_claims_tenant_id ON handoff_claims(workspace_id,id);
+CREATE TABLE IF NOT EXISTS handoff_claim_messages (
+  id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, claim_id INTEGER NOT NULL,
+  request_key TEXT NOT NULL, author_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('request','reply')), body TEXT NOT NULL,
+  UNIQUE (workspace_id,claim_id,request_key),
+  FOREIGN KEY (workspace_id,claim_id) REFERENCES handoff_claims(workspace_id,id),
+  FOREIGN KEY (workspace_id,author_id) REFERENCES users(workspace_id,id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS handoff_claim_messages_thread ON handoff_claim_messages(workspace_id,claim_id,id DESC);
 
 CREATE TABLE IF NOT EXISTS google_ads_campaigns (
   workspace_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, customer_id TEXT NOT NULL, external_id TEXT NOT NULL,

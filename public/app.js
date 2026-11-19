@@ -21,18 +21,20 @@ const events = {
   google_ads_configured: 'Napojení kampaně Google Ads', google_ads_sync: 'Synchronizace Google Ads',
   handoff_confirmed: 'Potvrzení převzetí klientem', handoff_claim_filed: 'Podaná reklamace',
   handoff_claim_review: 'Převzetí reklamace', handoff_claim_accepted: 'Uznaná reklamace', handoff_claim_rejected: 'Zamítnutá reklamace',
+  handoff_claim_evidence_requested: 'Vyžádání podkladů', handoff_claim_evidence_supplied: 'Doplnění podkladů klientem',
 };
 const available = {
-  admin: ['prehled', 'poptavky', 'predani', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
+  admin: ['prehled', 'poptavky', 'predani', 'reakce', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
   marketing: ['prehled', 'poptavky', 'kampane', 'ucet'],
   agent: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'ucet'],
-  care: ['prehled', 'poptavky', 'predani', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
+  care: ['prehled', 'poptavky', 'predani', 'reakce', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
   investor: ['prehled', 'portfolio', 'schranka', 'ucet'],
-  client: ['prehled', 'ucet'],
+  client: ['prehled', 'reakce', 'ucet'],
 };
 const titles = {
   prehled: ['Přehled', 'grid'], poptavky: ['Poptávky', 'list'], ukoly: ['Úkoly', 'check'],
   predani: ['Předání klientům', 'check'],
+  reakce: ['Čeká na reakci', 'mail'],
   kampane: ['Klienti a kampaně', 'bag'],
   upozorneni: ['Upozornění', 'mail'], investori: ['Investoři', 'bag'], komunikace: ['Zprávy pro investory', 'mail'],
   uzivatele: ['Uživatelé', 'user'], historie: ['Historie změn', 'clock'],
@@ -51,6 +53,8 @@ let renderNumber = 0;
 let busy = false;
 let clientQuery = '';
 let handoffParams = new URLSearchParams();
+let attentionPage = 1;
+let checkingAttention = false;
 let adsFormValues = {};
 
 function node(tag, attrs, ...children) {
@@ -271,6 +275,7 @@ function overview() {
   if (unread) output.push(actions(link('Nepřečtená upozornění (' + unread + ')', '#upozorneni', { className: 'button secondary' })));
   if (state.handoffSummary?.active) output.push(actions(link('Otevřené reklamace (' + state.handoffSummary.active + ')', '#predani',
     { className: 'button secondary' })));
+  if (typeof state.handoffAttention === 'number') output.push(attentionLink());
   if (state.tasks) {
     const upcoming = state.tasks.filter((task) => !task.done_at).slice(0, 5);
     output.push(card('Otevřené úkoly', table(['Úkol', 'Termín', 'Odpovídá'], upcoming
@@ -527,6 +532,7 @@ async function clientOverview() {
   const page = (value) => update(new URLSearchParams([...query, ['page', value]]));
   return [
     heading('Klientský přehled', pill(report.client)),
+    attentionLink(),
     metrics([
       ['Předané poptávky', report.totals.handed],
       ['Evidované náklady', czk(report.totals.cost_cents)],
@@ -549,7 +555,7 @@ async function clientOverview() {
     card('Předané poptávky', [
       table(['Kontakt', 'Projekt', 'Kampaň', 'Předáno', 'Převzetí', 'Reklamace'], report.deliveries.map((row) => [
         node('span', {}, link(row.name, '#predani/' + row.id), node('small', { className: 'line-meta' }, row.email)),
-        row.project, row.campaign, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status),
+        row.project, row.campaign, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status, row.claim_turn),
       ]), 'Ve zvoleném období nebyla předána žádná poptávka.'),
       pagination(report.page, report.pages, page),
     ]),
@@ -557,13 +563,65 @@ async function clientOverview() {
 }
 
 const receiptStatus = (row) => pill(row.confirmed_at ? 'Potvrzeno' : 'Čeká na potvrzení', row.confirmed_at ? 'positive' : '');
-const claimStatus = (status) => status ? pill(claimStates[status], status === 'accepted' ? 'positive' : '') : '—';
+const claimStatus = (status, turn) => {
+  if (status === 'review' && turn === 'request') return pill(state.user.role === 'client' ? 'Čeká na vás' : 'Čeká na klienta', 'attention');
+  if (status === 'review' && turn === 'reply') return pill('Podklady doplněny', 'positive');
+  return status ? pill(claimStates[status], status === 'accepted' ? 'positive' : '') : '—';
+};
+
+const attentionLabel = () => (state.user.role === 'client' ? 'Čeká na vaši odpověď' : 'Čeká na reakci týmu') + ' (' + state.handoffAttention + ')';
+
+function attentionLink() {
+  return link(attentionLabel(), '#reakce', { id: 'handoff-alert', className: 'button secondary attention-link', hidden: !state.handoffAttention });
+}
+
+async function refreshAttention() {
+  const current = state;
+  if (document.hidden || busy || checkingAttention || typeof current?.handoffAttention !== 'number') return;
+  checkingAttention = true;
+  try {
+    const { count } = await api('/api/handoff-attention/count');
+    if (state !== current || count === state.handoffAttention) return;
+    state.handoffAttention = count;
+    const badge = $('handoff-attention-count');
+    if (badge) {
+      badge.textContent = String(count);
+      badge.hidden = !count;
+    }
+    const alert = $('handoff-alert');
+    if (alert) {
+      alert.textContent = attentionLabel();
+      alert.hidden = !count;
+    }
+  } catch {
+    // The next refresh retries without interrupting a draft or changing the current view.
+  } finally { checkingAttention = false; }
+}
+
+async function handoffAttention() {
+  const inbox = await api('/api/handoff-attention?page=' + attentionPage);
+  const client = state.user.role === 'client';
+  return [
+    heading(client ? 'Čeká na vaši odpověď' : 'Čeká na reakci týmu', actionButton('Obnovit seznam', () => run(refresh))),
+    node('section', { className: 'card' }, [
+      table(['Poptávka', 'Kampaň', 'Předáno', 'Reklamace'], inbox.rows.map((row) => [
+        link(row.name, '#predani/' + row.id + '/reakce'), row.campaign, formatDate(row.handed_day),
+        claimStatus(row.claim_status, row.claim_turn),
+      ]), 'Žádná reklamace teď nečeká na vaši reakci.'),
+      pagination(inbox.page, inbox.pages, (page) => run(async () => {
+        const previous = attentionPage;
+        attentionPage = page;
+        try { await render(true); } catch (error) { attentionPage = previous; throw error; }
+      })),
+    ]),
+  ];
+}
 
 async function handoffInbox() {
   const inbox = await api('/api/handoffs?' + handoffParams);
   const summary = state.handoffSummary;
   const options = { active: 'Otevřené reklamace', waiting: 'Čeká na potvrzení', confirmed: 'Potvrzená převzetí',
-    closed: 'Vyřízené reklamace', all: 'Všechna předání' };
+    closed: 'Vyřízené reklamace', client_turn: 'Čeká na podklady klienta', all: 'Všechna předání' };
   const status = field('Stav předání', 'status', Object.entries(options));
   status.querySelector('select').value = inbox.status;
   const update = (params) => run(async () => {
@@ -581,7 +639,7 @@ async function handoffInbox() {
       form('Použít filtr', [status], ({ status }) => update({ status })),
       table(['Poptávka', 'Klient', 'Předáno', 'Převzetí', 'Reklamace'], inbox.rows.map((row) => [
         node('span', {}, link(row.name, '#predani/' + row.id), node('small', { className: 'line-meta' }, row.campaign)),
-        row.client, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status),
+        row.client, formatDate(row.handed_day), receiptStatus(row), claimStatus(row.claim_status, row.claim_turn),
       ]), 'V tomto přehledu zatím nejsou žádné předané poptávky.'),
       pagination(inbox.page, inbox.pages, (page) => update({ status: inbox.status, page })),
     ]),
@@ -603,17 +661,36 @@ function claimCard(claim, team) {
   const take = claim.status === 'open' || (claim.status === 'review' && claim.reviewer_id !== state.user.id);
   const canResolve = claim.status === 'review' && (state.user.role === 'admin' || claim.reviewer_id === state.user.id);
   const args = { id: claim.id, version: claim.version };
+  const turn = claim.messages.at(-1)?.kind;
+  const request = team && canResolve && turn !== 'request';
+  const reply = !team && claim.status === 'review' && turn === 'request';
+  const thread = claim.messages.length ? [
+    node('h3', {}, 'Vlákno reklamace'),
+    node('ol', { className: 'claim-thread' }, claim.messages.map((message) => node('li', {},
+      node('div', { className: 'actions' },
+        node('strong', {}, message.kind === 'request' ? 'Požadavek týmu' : 'Doplnění klienta'),
+        node('span', { className: 'muted' }, message.author + ' · ' + formatDate(message.created_at))),
+      node('p', { className: 'prose' }, message.body)))),
+  ] : null;
+  const evidenceForm = (label, fieldLabel, action, message) => {
+    const requestKey = crypto.randomUUID();
+    return form(label, [field(fieldLabel, 'message', 'textarea', { maxlength: 1600 })],
+      (data) => command(action, { ...args, ...data, request_key: requestKey }, message));
+  };
   return card('Reklamace #' + claim.id, [
-    actions(claimStatus(claim.status), node('span', { className: 'muted' }, formatDate(claim.filed_at) + ' · ' + claim.reporter)),
+    actions(claimStatus(claim.status, turn), node('span', { className: 'muted' }, formatDate(claim.filed_at) + ' · ' + claim.reporter)),
     node('p', { className: 'claim-reason' }, claimReasons[claim.reason]),
     claim.description ? node('p', { className: 'prose' }, claim.description) : null,
     team && claim.reviewer ? node('p', { className: 'muted' }, 'Řeší ' + claim.reviewer + ' · ' + formatDate(claim.reviewed_at)) : null,
+    thread,
     claim.resolution ? [
       node('h3', {}, 'Vyjádření týmu'), node('p', { className: 'prose' }, claim.resolution),
       node('p', { className: 'muted' }, formatDate(claim.resolved_at) + (team && claim.resolver ? ' · ' + claim.resolver : '')),
     ] : null,
     team && take ? actions(actionButton(claim.status === 'open' ? 'Převzít reklamaci' : 'Převzít řešení',
       () => command('review-handoff-claim', args, 'Reklamace je v řešení.'))) : null,
+    request ? evidenceForm('Vyžádat podklady', 'Požadované podklady', 'request-claim-evidence', 'Požadavek je ve vlákně reklamace.') : null,
+    reply ? evidenceForm('Doplnit podklady', 'Doplnění podkladů', 'reply-claim-evidence', 'Podklady byly doplněny.') : null,
     team && canResolve ? form('Uložit rozhodnutí', [
       field('Výsledek reklamace', 'outcome', [['accepted', 'Uznat reklamaci'], ['rejected', 'Zamítnout reklamaci']]),
       field('Vyjádření pro klienta', 'resolution', 'textarea', { maxlength: 1600 }),
@@ -621,10 +698,10 @@ function claimCard(claim, team) {
   ], 'claim-card');
 }
 
-async function handoffView(id) {
+async function handoffView(id, fromAttention) {
   const { delivery, claims } = await api('/api/handoffs/' + id);
   const team = state.user.role !== 'client';
-  const back = team ? '#predani' : '#prehled';
+  const back = fromAttention ? '#reakce' : team ? '#predani' : '#prehled';
   const summary = node('dl', { className: 'detail-grid' }, [
     ['Kontakt', delivery.email], ['Projekt', delivery.project], ['Kampaň', delivery.campaign + ' · ' + delivery.code],
     ['Předáno', formatDate(delivery.handed_at)], ['Klient', delivery.client], ['Převzetí', receiptStatus(delivery)],
@@ -633,7 +710,7 @@ async function handoffView(id) {
     'Potvrzení převzetí · ' + delivery.confirmed_by + ' · ' + formatDate(delivery.confirmed_at)) : null;
   return [
     heading(delivery.name, actions(actionButton('Obnovit detail', () => run(refresh)),
-      link(team ? 'Zpět k předáním' : 'Zpět do přehledu', back, { className: 'button secondary' }))),
+      link(fromAttention ? 'Zpět k upozorněním' : team ? 'Zpět k předáním' : 'Zpět do přehledu', back, { className: 'button secondary' }))),
     card('Předaná poptávka', [
       summary, receipt,
       !team && !delivery.confirmed_at ? actions(actionButton('Potvrdit převzetí',
@@ -704,6 +781,7 @@ function account() {
 const views = {
   prehled: overview, poptavky: leadList, kampane: campaignManagement, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
   predani: handoffInbox,
+  reakce: handoffAttention,
   komunikace: () => messages(false), portfolio: () => positions(true), schranka: () => messages(true),
   historie: () => [heading('Historie změn'), card('Aktivita organizace', timeline(state.activity))], ucet: account,
 };
@@ -720,7 +798,9 @@ function navigation(active) {
   $('toolbar-role').textContent = roleNames[role];
   const links = available[role].map((route) => {
     const [label, glyph] = titles[route];
-    return node('a', { href: '#' + route, 'aria-current': route === active ? 'page' : null }, icon(glyph), label);
+    const badge = route === 'reakce' ? node('span', { id: 'handoff-attention-count', className: 'attention-count', hidden: !state.handoffAttention,
+      'aria-live': 'polite' }, String(state.handoffAttention)) : null;
+    return node('a', { href: '#' + route, 'aria-current': route === active ? 'page' : null }, icon(glyph), label, badge);
   });
   if (browserDemo) links.push(node('a', { href: './', target: '_blank', rel: 'noopener' }, icon('user'), 'Otevřít další roli'));
   $('navigation').replaceChildren(...links);
@@ -736,23 +816,24 @@ async function render(propagateError = false) {
     return;
   }
   const lead = /^poptavka\/(\d{1,12})$/.exec(hash);
-  const handoff = /^predani\/(\d{1,12})$/.exec(hash);
+  const handoff = /^predani\/(\d{1,12})(\/reakce)?$/.exec(hash);
   const maySeeHandoff = ['admin', 'care', 'client'].includes(state.user.role);
-  const route = handoff && maySeeHandoff ? (state.user.role === 'client' ? 'prehled' : 'predani') : lead ? 'poptavky' : hash;
+  const route = handoff && maySeeHandoff ? (handoff[2] ? 'reakce' : state.user.role === 'client' ? 'prehled' : 'predani') : lead ? 'poptavky' : hash;
   const active = available[state.user.role].includes(route) ? route : 'prehled';
   const report = active === 'prehled' && state.user.role === 'client';
   navigation(active);
   try {
-    const content = handoff && maySeeHandoff ? await handoffView(handoff[1]) : report ? await clientOverview()
+    const content = handoff && maySeeHandoff ? await handoffView(handoff[1], Boolean(handoff[2])) : report ? await clientOverview()
       : lead && active === 'poptavky' && state.user.role !== 'marketing' ? await leadView(lead[1]) : await views[active]();
     if (revision === renderNumber) screen.replaceChildren(...content);
   } catch (e) {
     if (propagateError) throw e;
     if (revision !== renderNumber) return;
     if (handoff && maySeeHandoff) screen.replaceChildren(heading('Předaná poptávka'), empty(e.message),
-      link('Zpět do přehledu', report ? '#prehled' : '#predani'));
+      link('Zpět do přehledu', '#' + active));
     else if (report || active === 'predani') screen.replaceChildren(heading(report ? 'Klientský přehled' : 'Předání klientům'),
       empty(e.message), actionButton('Obnovit přehled', () => run(refresh)));
+    else if (active === 'reakce') screen.replaceChildren(heading('Čeká na reakci'), empty(e.message), actionButton('Obnovit seznam', () => run(refresh)));
     else screen.replaceChildren(heading('Poptávka'), empty(e.message), link('Zpět k poptávkám', '#poptavky'));
   }
 }
@@ -762,6 +843,7 @@ $('logout').addEventListener('click', () => void run(async () => {
   state = undefined;
   clientQuery = '';
   handoffParams = new URLSearchParams();
+  attentionPage = 1;
   adsFormValues = {};
   document.body.classList.remove('menu-open');
   $('menu-toggle').setAttribute('aria-expanded', 'false');
@@ -778,6 +860,9 @@ window.addEventListener('hashchange', () => {
   notice('');
   void render().then(() => screen.querySelector('h1')?.focus({ preventScroll: true }));
 });
+window.addEventListener('focus', refreshAttention);
+document.addEventListener('visibilitychange', refreshAttention);
+setInterval(refreshAttention, 15000);
 
 try {
   config = await api('/api/config');
