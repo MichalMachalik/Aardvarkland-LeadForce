@@ -1,4 +1,5 @@
 import { clientAccounts, reportDay } from './client-accounts.mjs';
+import { claimDeadlineCalculator } from './claim-calendar.mjs';
 import { googleAdsStore } from './google-ads-store.mjs';
 import { handoffFeedback } from './handoff-feedback.mjs';
 import { initializeSchema } from './schema.mjs';
@@ -24,6 +25,7 @@ function slug(value) {
 
 export function createStore(db, schema, { hash, passwordDigest, passwordMatches, token }, { claimClock = Date.now } = {}) {
   const upgraded = initializeSchema(db, schema);
+  db.function('claim_business_due', { deterministic: true }, claimDeadlineCalculator());
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
@@ -231,6 +233,7 @@ export function createStore(db, schema, { hash, passwordDigest, passwordMatches,
     const [scope, args] = leadScope(actor);
     const stagesInScope = all('SELECT l.stage,count(*) AS total FROM leads l LEFT JOIN users u ON u.id=l.owner_id AND u.workspace_id=l.workspace_id WHERE l.workspace_id=? ' + scope + ' GROUP BY l.stage', org, ...args);
     const result = { ...base, leads, stages: stagesInScope };
+    if (role === 'admin') result.claimCalendar = feedback.calendar(actor);
     if (role === 'admin' || role === 'marketing') {
       result.clientManagement = clients.management(actor);
       result.googleAds = googleAds.management(actor);

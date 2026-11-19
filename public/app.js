@@ -22,9 +22,10 @@ const events = {
   handoff_confirmed: 'Potvrzení převzetí klientem', handoff_claim_filed: 'Podaná reklamace',
   handoff_claim_review: 'Převzetí reklamace', handoff_claim_accepted: 'Uznaná reklamace', handoff_claim_rejected: 'Zamítnutá reklamace',
   handoff_claim_evidence_requested: 'Vyžádání podkladů', handoff_claim_evidence_supplied: 'Doplnění podkladů klientem',
+  handoff_calendar_saved: 'Změna pracovního kalendáře reklamací',
 };
 const available = {
-  admin: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
+  admin: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'lhuty', 'kampane', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'uzivatele', 'historie', 'ucet'],
   marketing: ['prehled', 'poptavky', 'kampane', 'ucet'],
   agent: ['prehled', 'poptavky', 'ukoly', 'upozorneni', 'ucet'],
   care: ['prehled', 'poptavky', 'predani', 'reakce', 'eskalace', 'ukoly', 'upozorneni', 'investori', 'komunikace', 'ucet'],
@@ -36,6 +37,7 @@ const titles = {
   predani: ['Předání klientům', 'check'],
   reakce: ['Čeká na reakci', 'mail'],
   eskalace: ['Eskalace reklamací', 'clock'],
+  lhuty: ['Lhůty reklamací', 'clock'],
   kampane: ['Klienti a kampaně', 'bag'],
   upozorneni: ['Upozornění', 'mail'], investori: ['Investoři', 'bag'], komunikace: ['Zprávy pro investory', 'mail'],
   uzivatele: ['Uživatelé', 'user'], historie: ['Historie změn', 'clock'],
@@ -44,6 +46,7 @@ const titles = {
 const kcz = new Intl.NumberFormat('cs-CZ', { style: 'currency', currency: 'CZK', minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const dateOnly = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'UTC' });
 const dateTime = new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'short', timeStyle: 'short' });
+const pragueDateTime = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'Europe/Prague', dateStyle: 'short', timeStyle: 'short' });
 const formatDate = (value) => value ? (value.length === 10 ? dateOnly.format(new Date(value + 'T00:00:00Z')) : dateTime.format(new Date(value))) : '—';
 const localDate = () => new Intl.DateTimeFormat('sv-SE').format(new Date());
 const reportDate = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Prague' }).format(new Date());
@@ -599,8 +602,15 @@ function updateCounter(route, count) {
 
 function deadline(due, overdue) {
   if (!due) return '—';
-  return node('span', { className: 'claim-deadline' }, node('time', { datetime: due }, formatDate(due)),
+  return node('span', { className: 'claim-deadline' },
+    node('time', { datetime: due, title: 'Čas Praha' }, pragueDateTime.format(new Date(due))),
     node('span', { className: 'pill overdue', 'data-claim-deadline': due, hidden: !overdue }, 'Po lhůtě'));
+}
+
+function calendarNotice(revision) {
+  if (revision == null) return null;
+  return node('p', { id: 'claim-calendar-notice', className: 'muted', role: 'status', hidden: true, 'data-calendar-revision': revision },
+    'Pracovní kalendář se změnil. Obnovte zobrazení pro nové termíny.');
 }
 
 async function refreshAttention() {
@@ -608,10 +618,15 @@ async function refreshAttention() {
   if (document.hidden || busy || checkingAttention || typeof current?.handoffAttention !== 'number') return;
   checkingAttention = true;
   try {
-    const { count, overdue, checkedAt } = await api('/api/handoff-attention/count');
+    const { count, overdue, checkedAt, calendarRevision } = await api('/api/handoff-attention/count');
     if (state !== current) return;
     updateCounter('reakce', count);
     updateCounter('eskalace', overdue);
+    const message = $('claim-calendar-notice');
+    if (message && Number(message.dataset.calendarRevision) !== calendarRevision) {
+      message.hidden = false;
+      return;
+    }
     for (const status of screen.querySelectorAll('[data-claim-deadline]')) status.hidden = status.dataset.claimDeadline > checkedAt;
   } catch {
     // The next refresh retries without interrupting a draft or changing the current view.
@@ -624,6 +639,7 @@ async function handoffAttention(route) {
   const client = state.user.role === 'client';
   return [
     heading(responseTitle(route), actionButton('Obnovit seznam', () => run(refresh))),
+    calendarNotice(inbox.rows[0]?.calendar_revision),
     node('section', { className: 'card' }, [
       table(['Poptávka', 'Kampaň', 'Reklamace', 'Na tahu', 'Termín reakce'], inbox.rows.map((row) => [
         link(row.name, '#predani/' + row.id + '/' + route), row.campaign, claimStatus(row.claim_status, row.claim_turn),
@@ -655,6 +671,7 @@ async function handoffInbox() {
   });
   return [
     heading('Předání klientům', actionButton('Obnovit seznam', () => run(refresh))),
+    calendarNotice(inbox.rows[0]?.calendar_revision),
     metrics([['Předané poptávky', summary.total], ['Potvrzená převzetí', summary.confirmed], ['Otevřené reklamace', summary.active]]),
     card('Přehled předání', [
       form('Použít filtr', [status], ({ status }) => update({ status })),
@@ -735,6 +752,7 @@ async function handoffView(id, route) {
   return [
     heading(delivery.name, actions(actionButton('Obnovit detail', () => run(refresh)),
       link(backLabel[route], '#' + route, { className: 'button secondary' }))),
+    calendarNotice(delivery.sla_due_at ? delivery.calendar_revision : null),
     card('Předaná poptávka', [
       summary, receipt,
       !team && !delivery.confirmed_at ? actions(actionButton('Potvrdit převzetí',
@@ -803,10 +821,30 @@ function account() {
     ], (data) => run(async () => { await api('/api/password', data); await refresh(); notice('Heslo bylo změněno.'); })))];
 }
 
+function claimCalendarSettings() {
+  const calendar = state.claimCalendar;
+  const hours = { min: 1, max: 240, step: 1 };
+  const closures = field('Dny volna navíc', 'closures', 'textarea', {
+    required: false, maxlength: 4096, placeholder: 'RRRR-MM-DD', 'aria-describedby': 'claim-closures-help',
+  });
+  closures.querySelector('textarea').value = calendar.closures.join('\n');
+  return [heading('Lhůty reklamací', actionButton('Obnovit nastavení', () => run(refresh))), card('Pracovní kalendář', [
+    node('p', { className: 'muted' }, 'Pondělí až pátek · čas Praha. České svátky se vynechávají automaticky.'),
+    node('p', { className: 'muted', id: 'claim-closures-help' }, 'Dny volna navíc zadejte po jednom na řádek ve formátu RRRR-MM-DD.'),
+    form('Uložit pracovní kalendář', [
+      field('Začátek pracovní doby', 'opens', 'time', { value: calendar.opens }),
+      field('Konec pracovní doby', 'closes', 'time', { value: calendar.closes }),
+      field('Lhůta týmu v pracovních hodinách', 'teamHours', 'number', { ...hours, value: calendar.teamHours }),
+      field('Lhůta klienta v pracovních hodinách', 'clientHours', 'number', { ...hours, value: calendar.clientHours }),
+      closures,
+    ], (data) => command('save-claim-calendar', { ...data, version: calendar.version }, 'Pracovní kalendář byl uložen.')),
+  ])];
+}
+
 const views = {
   prehled: overview, poptavky: leadList, kampane: campaignManagement, ukoly: tasks, upozorneni: notificationList, uzivatele: users, investori: () => positions(false),
   predani: handoffInbox,
-  reakce: () => handoffAttention('reakce'), eskalace: () => handoffAttention('eskalace'),
+  reakce: () => handoffAttention('reakce'), eskalace: () => handoffAttention('eskalace'), lhuty: claimCalendarSettings,
   komunikace: () => messages(false), portfolio: () => positions(true), schranka: () => messages(true),
   historie: () => [heading('Historie změn'), card('Aktivita organizace', timeline(state.activity))], ucet: account,
 };

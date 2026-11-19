@@ -3,7 +3,7 @@ import { prepareExampleBinding } from './google-ads-example.mjs';
 
 export function createExample(open, token) {
   let seeding = true;
-  const store = open({ claimClock: () => Date.now() - (seeding ? 73 * 60 * 60 * 1000 : 0) });
+  const store = open({ claimClock: () => Date.now() - (seeding ? 21 * 24 * 60 * 60 * 1000 : 0) });
   try {
     return { store, profiles: populateExample(store, token) };
   } finally { seeding = false; }

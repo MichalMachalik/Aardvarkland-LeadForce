@@ -308,7 +308,7 @@ async function published(context) {
   await demo(context);
   await clientPortal(context);
   await googleAdsPilot(context);
-  await handoffFeedback(context);
+  await claimWorkflows(context);
   const isolated = await context.page(1366, true);
   await btn(isolated, /^Správce ·/).click();
   await goto(isolated, 'Poptávky');
@@ -495,15 +495,61 @@ async function handoffFeedback({ page }) {
   await staff.getByText('Žádná otevřená reklamace není po lhůtě.', { exact: true }).waitFor();
 }
 
+async function claimCalendarSettings({ page }) {
+  const admin = await page();
+  await btn(admin, /^Správce ·/).click();
+  await goto(admin, 'Lhůty reklamací');
+  await titled(admin, 'Lhůty reklamací');
+  assert.equal(await admin.getByLabel('Začátek pracovní doby').inputValue(), '08:00');
+  assert.equal(await admin.getByLabel('Lhůta klienta v pracovních hodinách').inputValue(), '72');
+
+  const client = await page(320);
+  await btn(client, /^Klient ·/).click();
+  await titled(client, 'Klientský přehled');
+  assert.equal(await client.locator('#navigation a[href="#lhuty"]').count(), 0);
+  await client.getByRole('link', { name: 'Hana Vítová', exact: true }).click();
+  await titled(client, 'Hana Vítová');
+  const deadline = client.locator('.claim-deadline time');
+  const before = await deadline.getAttribute('datetime');
+  assert.ok(before);
+
+  await set(admin, {
+    'Začátek pracovní doby': '09:00', 'Konec pracovní doby': '17:00',
+    'Lhůta týmu v pracovních hodinách': '12', 'Lhůta klienta v pracovních hodinách': '48',
+    'Dny volna navíc': '2035-02-14',
+  });
+  await btn(admin, 'Uložit pracovní kalendář').click();
+  await admin.getByText('Pracovní kalendář byl uložen.', { exact: true }).waitFor();
+  await admin.reload();
+  await titled(admin, 'Lhůty reklamací');
+  assert.equal(await admin.getByLabel('Začátek pracovní doby').inputValue(), '09:00');
+  assert.equal(await admin.getByLabel('Konec pracovní doby').inputValue(), '17:00');
+  assert.equal(await admin.getByLabel('Lhůta klienta v pracovních hodinách').inputValue(), '48');
+  assert.equal(await admin.getByLabel('Dny volna navíc').inputValue(), '2035-02-14');
+
+  await client.bringToFront();
+  await client.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await client.locator('#claim-calendar-notice').waitFor({ state: 'visible' });
+  await btn(client, 'Obnovit detail').click();
+  await client.locator('#claim-calendar-notice').waitFor({ state: 'hidden' });
+  assert.ok(Date.parse(await deadline.getAttribute('datetime')) < Date.parse(before));
+  assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+}
+
+async function claimWorkflows(context) {
+  await handoffFeedback(context);
+  await claimCalendarSettings(context);
+}
+
 const demoWorkflows = async (context) => {
   await demo(context);
   await clientPortal(context);
   await googleAdsPilot(context);
-  await handoffFeedback(context);
+  await claimWorkflows(context);
 };
 const check = process.env.TEST_URL
-  ? exerciseBrowser(process.env.TEST_URL, [], process.env.FEEDBACK_ONLY ? handoffFeedback : published, true)
+  ? exerciseBrowser(process.env.TEST_URL, [], process.env.FEEDBACK_ONLY ? claimWorkflows : published, true)
   : openCase(true, demoWorkflows).then(() => openCase(false, blank));
 check.then(() => {
-  console.log('PASS browser claim thread, response deadlines and team escalation');
+  console.log('PASS browser claim thread, escalation and working calendar settings');
 }).catch((error) => { console.error(error); process.exitCode = 1; });

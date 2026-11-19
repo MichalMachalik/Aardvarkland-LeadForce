@@ -39,7 +39,9 @@ Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí
 4. Jako **Klient** otevřete **Čeká na reakci**, vyberte případ a použijte **Doplnit podklady**. Na čerstvě otevřeném demu lze tenhle krok vyzkoušet rovnou u kontaktu **Hana Vítová**.
 5. Doplněný případ se vrátí do fronty týmu. Při potřebě dalších podkladů lze postup zopakovat. Po uložení rozhodnutí zůstává výsledek i celé vlákno v detailu. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
 
-**Lhůty na reakci.** Tým má 24 hodin od podání reklamace nebo od doplnění podkladů klientem. Převzetí reklamace původní termín zachová. Vyžádáním podkladů přechází odpočet na klienta, který má 72 hodin na odpověď. Lhůty běží v kalendářních hodinách. Po vypršení lhůty lze stále odpovědět nebo uložit rozhodnutí.
+**Lhůty na reakci.** Výchozí pracovní doba je od pondělí do pátku od 08:00 do 16:00 v časovém pásmu Praha. Tým má 24 pracovních hodin od podání reklamace nebo od doplnění podkladů klientem. Převzetí reklamace původní termín zachová. Vyžádáním podkladů přechází odpočet na klienta, který má 72 pracovních hodin na odpověď. Víkendy, [české svátky včetně Velkého pátku a Velikonočního pondělí](https://e-sbirka.gov.cz/eli/cz/sb/2000/245/2026-05-13) a vložené dny volna se vynechávají. Po vypršení lhůty lze stále odpovědět nebo uložit rozhodnutí.
+
+Správce může v **Lhůtách reklamací** změnit pracovní dobu, obě lhůty a doplnit mimořádné dny volna. Nastavení platí pro danou organizaci. Po uložení se termíny otevřených případů přepočítají od začátku aktuálního kola. Na dříve otevřené kartě se po zjištění změny zobrazí výzva k obnovení zobrazení.
 
 Prošlé otevřené případy se zobrazí v **Eskalacích reklamací** u správce a členů péče s přístupem k danému předání. Fronta uvádí termín i stranu, od které se čeká na reakci. Podle aktuálního termínu se počty v aplikaci obnovují při návratu na kartu a průběžně při jejím otevření. Obsah vlákna se načte znovu tlačítkem **Obnovit detail**. V čerstvém demu najde role **Péče** případ **Hana Vítová** už po lhůtě. Po odpovědi klienta se vrátí mezi běžné případy na reakci týmu s novým termínem.
 

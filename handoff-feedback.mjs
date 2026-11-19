@@ -1,10 +1,9 @@
 import { Failure, id, text } from './validation.mjs';
+import { defaultClaimCalendar, validateClaimCalendar } from './claim-calendar.mjs';
 
 const reasons = ['unreachable', 'invalid_contact', 'duplicate', 'out_of_scope', 'other'];
 const active = (status) => status === 'open' || status === 'review';
 const pageSize = 25;
-const teamHours = 24;
-const clientHours = 72;
 const handoffJoin = `FROM client_leads d
   JOIN leads l ON l.workspace_id=d.workspace_id AND l.id=d.lead_id
   JOIN client_campaigns c ON c.workspace_id=d.workspace_id AND c.id=d.campaign_id
@@ -18,18 +17,19 @@ const handoffJoin = `FROM client_leads d
   LEFT JOIN handoff_claim_messages message ON message.id=(
     SELECT m.id FROM handoff_claim_messages m WHERE m.workspace_id=last.workspace_id AND m.claim_id=last.id ORDER BY m.id DESC LIMIT 1
   )
+  LEFT JOIN handoff_calendars cal ON cal.workspace_id=d.workspace_id
   WHERE d.workspace_id=? AND d.handed_day IS NOT NULL `;
 const openClaim = "last.status IN ('open','review')";
 const clientTurn = "(last.status='review' AND message.kind='request')";
 const teamTurn = `(${openClaim} AND NOT (${clientTurn} IS TRUE))`;
 // Taking ownership does not count as a reply. Only a message starts a new turn.
-const dueAt = `CASE WHEN ${openClaim} THEN strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(message.created_at,last.filed_at),
-  CASE WHEN ${clientTurn} THEN '+${clientHours} hours' ELSE '+${teamHours} hours' END) END`;
+const dueAt = `CASE WHEN ${openClaim} THEN claim_business_due(COALESCE(message.created_at,last.filed_at),
+  ${clientTurn} IS TRUE,cal.policy) END`;
 const overdue = `(${dueAt} <= ?)`;
 const columns = `l.id,l.name,l.email,l.handed_at,d.handed_day,c.name AS campaign,c.code,c.project,a.name AS client,
   receipt.confirmed_at,confirmer.name AS confirmed_by,last.status AS claim_status,
   CASE WHEN last.status='review' THEN message.kind END AS claim_turn,
-  ${dueAt} AS sla_due_at,COALESCE(${overdue},0) AS sla_overdue`;
+  ${dueAt} AS sla_due_at,COALESCE(${overdue},0) AS sla_overdue,COALESCE(cal.version,0) AS calendar_revision`;
 const missing = () => new Failure(404, 'Předaná poptávka nebyla nalezena.');
 
 function requestKey(value, label) {
@@ -41,6 +41,12 @@ function requestKey(value, label) {
 
 export function handoffFeedback({ get, all, run, event, allow, clientName, clock }) {
   const stamp = () => new Date(clock()).toISOString();
+
+  function calendar(actor) {
+    allow(actor, 'admin');
+    const row = get('SELECT policy,version FROM handoff_calendars WHERE workspace_id=?', actor.workspace_id);
+    return row ? { ...JSON.parse(row.policy), version: row.version } : { ...defaultClaimCalendar, version: 0 };
+  }
 
   function scope(actor) {
     if (actor.role === 'client') return [' AND c.client_id=?', [clientName(actor).id]];
@@ -114,10 +120,13 @@ export function handoffFeedback({ get, all, run, event, allow, clientName, clock
   function attentionCounts(actor) {
     const [filter, args] = scope(actor);
     const checkedAt = stamp();
+    const revision = 'COALESCE((SELECT version FROM handoff_calendars WHERE workspace_id=?),0) AS calendarRevision';
     const counts = actor.role === 'client'
-      ? get(`SELECT COUNT(*) AS count ${handoffJoin}${filter} AND ${clientTurn}`, actor.workspace_id, ...args)
+      ? get(`SELECT COUNT(*) AS count,${revision} ${handoffJoin}${filter} AND ${clientTurn}`,
+        actor.workspace_id, actor.workspace_id, ...args)
       : get(`SELECT COUNT(CASE WHEN ${teamTurn} THEN 1 END) AS count,
-          COUNT(CASE WHEN ${overdue} THEN 1 END) AS overdue ${handoffJoin}${filter}`, checkedAt, actor.workspace_id, ...args);
+          COUNT(CASE WHEN ${overdue} THEN 1 END) AS overdue,${revision} ${handoffJoin}${filter}`,
+        checkedAt, actor.workspace_id, actor.workspace_id, ...args);
     return { ...counts, checkedAt };
   }
 
@@ -171,6 +180,17 @@ export function handoffFeedback({ get, all, run, event, allow, clientName, clock
   }
 
   const actions = {
+    'save-claim-calendar'(actor, body) {
+      const existing = calendar(actor);
+      const policy = validateClaimCalendar(body);
+      if (String(existing.version) !== String(body.version)) {
+        throw new Failure(409, 'Kalendář mezitím někdo změnil. Obnovte nastavení a zkontrolujte údaje.');
+      }
+      run(`INSERT INTO handoff_calendars (workspace_id,policy,version) VALUES (?,?,1)
+        ON CONFLICT(workspace_id) DO UPDATE SET policy=excluded.policy,version=handoff_calendars.version+1`,
+      actor.workspace_id, JSON.stringify(policy));
+      event(actor, 'handoff_calendar_saved');
+    },
     'confirm-handoff'(actor, body) {
       allow(actor, 'client');
       const lead = delivery(actor, body.id);
@@ -225,5 +245,5 @@ export function handoffFeedback({ get, all, run, event, allow, clientName, clock
     'reply-claim-evidence': (actor, body) => postMessage(actor, body, 'reply'),
   };
 
-  return { details, summary, inbox, attention, attentionCounts, actions };
+  return { calendar, details, summary, inbox, attention, attentionCounts, actions };
 }

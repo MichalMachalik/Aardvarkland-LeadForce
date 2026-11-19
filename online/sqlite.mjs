@@ -15,6 +15,7 @@ export function sqliteConnection(database) {
   return {
     exec: (sql) => database.exec(sql),
     close: () => database.close(),
+    function(name, _options, callback) { database.create_function(name, callback); },
     prepare(sql) {
       return {
         get: (...params) => rows(database, sql, params, true),

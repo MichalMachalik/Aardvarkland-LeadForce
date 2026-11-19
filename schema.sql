@@ -152,6 +152,12 @@ CREATE TABLE IF NOT EXISTS handoff_claim_messages (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS handoff_claim_messages_thread ON handoff_claim_messages(workspace_id,claim_id,id DESC);
 
+CREATE TABLE IF NOT EXISTS handoff_calendars (
+  workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id),
+  policy TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK(version >= 1)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS google_ads_campaigns (
   workspace_id INTEGER NOT NULL, campaign_id INTEGER NOT NULL, customer_id TEXT NOT NULL, external_id TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 0, last_run TEXT,
