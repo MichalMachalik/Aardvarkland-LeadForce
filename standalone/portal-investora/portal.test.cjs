@@ -5,7 +5,7 @@ const test = require('node:test');
 const portal = require('./portal-data.js');
 
 test('portfolio excludes completed principal and finds the earliest active payment', () => {
-  const summary = portal.portfolio();
+  const summary = portal.portfolio('2026-12-18');
   assert.equal(summary.invested, 400000);
   assert.equal(summary.active.length, 2);
   assert.deepEqual([summary.next.position.id, summary.next.date, summary.next.amount], ['MD-101', '2026-12-18', 6250]);
@@ -13,6 +13,17 @@ test('portfolio excludes completed principal and finds the earliest active payme
   const csv = portal.exportPortfolio(closed);
   assert.match(csv, /"MS-087";"Mlýn u Sadu";"100000";"Splacená";"2026-10-30";"";""/);
   assert.doesNotMatch(csv, /MD-101/);
+});
+
+test('upcoming payments include today and skip past dates in the overview and CSV', () => {
+  const { next } = portal.portfolio('2026-12-19');
+  assert.deepEqual([next.position.id, next.date, next.amount], ['BT-204', '2027-01-22', 3750]);
+  assert.equal(portal.portfolio('2027-04-24').next, undefined);
+  const csv = portal.exportPortfolio(portal.positions, '2026-12-19');
+  assert.match(csv, /"MD-101".*"2027-03-19";"6250"/);
+  assert.match(csv, /"BT-204".*"2027-01-22";"3750"/);
+  assert.doesNotMatch(csv, /2026-12-18/);
+  assert.match(portal.exportPortfolio(portal.positions, '2027-04-24'), /"MD-101".*"2028-06-30";"";""/);
 });
 
 test('catalog searches without Czech accents and combines category and saved filters', () => {

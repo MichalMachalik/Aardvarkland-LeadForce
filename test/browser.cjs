@@ -146,7 +146,8 @@ async function demo({ page }) {
   await titled(care, 'Karolína Procházková');
   await care.getByText('Předání domluveno na dopoledne.', { exact: true }).waitFor();
   await btn(care, 'Převzít poptávku').click();
-  await btn(care, 'Předat klientovi').click();
+  assert.equal(await btn(care, 'Předat klientovi').count(), 0);
+  await btn(care, 'Zaznamenat předání mimo LeadForce').click();
   await care.getByText('Předaná', { exact: true }).waitFor();
   await btn(care, 'Připojit účet investora').click();
   const invite = await care.getByLabel('Odkaz pozvánky').inputValue();
@@ -190,6 +191,7 @@ async function demo({ page }) {
   await care.getByText('Koncept byl upraven.').waitFor();
   await newInvestor.reload();
   await newInvestor.getByRole('row', { name: /Habr 2/ }).waitFor();
+  await newInvestor.getByRole('columnheader', { name: 'Investovaná částka', exact: true }).waitFor();
   const [portfolio] = await Promise.all([
     newInvestor.waitForEvent('download'),
     newInvestor.getByRole('link', { name: 'Stáhnout portfolio CSV' }).click(),

@@ -4,7 +4,7 @@
 
 Interaktivní ukázka s fiktivním portfoliem, platebním harmonogramem, katalogem příležitostí a schránkou zpráv. K dispozici je ukázkový účet bez přihlašování.
 
-- V portfoliu vyhledejte projekt podle názvu nebo ID a filtrujte aktivní či splacené pozice. Stejné filtry platí pro CSV a harmonogram, který lze stáhnout do kalendáře jako `.ics`.
+- V portfoliu vyhledejte projekt podle názvu nebo ID a filtrujte aktivní či splacené pozice. Stejné filtry platí pro CSV a harmonogram, který lze stáhnout do kalendáře jako `.ics`. Přehled a CSV hledají nejbližší platbu od aktuálního dne v časovém pásmu Praha. Harmonogram dál zobrazuje všechny evidované termíny.
 - V katalogu vyhledejte třeba `Javorova`, otevřete projekt a vyzkoušejte uložení příležitosti i záznam zkušebního zájmu.
 - Ve schránce vyhledávejte ve zprávách a filtrujte je podle pozice. Na její zprávy přejdete rovnou z detailu pozice. Otevření zprávy ji označí jako přečtenou. Tlačítko **Vymazat uložený stav** odstraní místní změny.
 

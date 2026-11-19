@@ -16,7 +16,7 @@ Pro ukázku používejte smyšlené údaje a e-maily s koncovkou `.example`. Poz
 
 1. V **Marketingu** vytvořte poptávku s projektem, kanálem a ID kampaně.
 2. V **Kvalifikaci** otevřete poptávku, převezměte ji a změňte stav na kontaktovanou. Přidejte interní poznámku, vyberte kolegu pro upozornění a poptávku kvalifikujte.
-3. V **Péči** zkontrolujte poznámku, převezměte poptávku a označte ji jako předanou. Propojte účet investora. Pokud chybí, vznikne odkaz na jednorázovou pozvánku.
+3. V **Péči** zkontrolujte poznámku a převezměte poptávku. U vlastní kampaně použijte **Zaznamenat předání mimo LeadForce**. U klientské kampaně tlačítko **Předat klientovi** zpřístupní poptávku i v účtu klienta. Poté propojte účet investora. Pokud chybí, vznikne odkaz na jednorázovou pozvánku.
 4. V dalším panelu založte účet z pozvánky. Z **Péče** přidejte tomuto účtu pozici a zveřejněte koncept zprávy. V účtu investora otevřete portfolio a zprávu. Stav přečtení se objeví po obnovení přehledu na straně péče.
 5. Ve **Správě** projděte uživatele, historii organizace a upozornění. **Marketing** může stáhnout CSV pro import do Auditu. Export obsahuje identifikátor poptávky, kanál, kampaň, stav a data, jména a e-maily v něm chybí.
 

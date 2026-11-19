@@ -5,6 +5,8 @@
   let { positions = [], opportunities = [], baseMessages = [], journeyMessages = [] } = fixtures ?? {};
 
   const stateKey = 'portal-investora.demo.v1';
+  const pragueDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Prague' });
+  const today = () => pragueDay.format(new Date());
   const knownIds = (values, allowed) => new Set(Array.isArray(values) ? values.filter((id) => allowed.has(id)) : []);
   const defaultState = () => ({ saved: new Set(), interest: new Set(), read: new Set(fixtures?.read) });
 
@@ -98,9 +100,10 @@
       .sort((first, second) => first.date.localeCompare(second.date) || first.position.id.localeCompare(second.position.id));
   }
 
-  function portfolio() {
+  function portfolio(from = today()) {
     const active = positions.filter((position) => position.status === 'active');
-    return { active, invested: sumMoney(active, 'principal'), next: paymentSchedule(active)[0] };
+    const next = paymentSchedule(active).find((payment) => payment.date >= from);
+    return { active, invested: sumMoney(active, 'principal'), next };
   }
 
   const sumCents = (rows, field) => rows.reduce((sum, row) => sum + Math.round(row[field] * 100), 0);
@@ -119,14 +122,17 @@
   }
 
   const positionStatus = { active: 'Aktivní', closed: 'Splacená' };
-  function exportPortfolio(entries) {
+  function exportPortfolio(entries, from = today()) {
     const csv = (cells) => cells.map((value) => {
       const text = String(value);
       const escaped = /^[\s\uFEFF]*[=+\-@]/.test(text) ? `'${text}` : text;
       return `"${escaped.replaceAll('"', '""')}"`;
     }).join(';');
     const headings = ['ID pozice', 'Projekt', 'Vložená částka CZK', 'Stav', 'Datum splatnosti', 'Nejbližší platba', 'Částka platby CZK'];
-    const rows = entries.map((item) => [item.id, item.name, item.principal, positionStatus[item.status], item.maturity, item.schedule[0]?.date ?? '', item.schedule[0]?.amount ?? '']);
+    const rows = entries.map((item) => {
+      const next = item.status === 'active' ? item.schedule.find((payment) => payment.date >= from) : undefined;
+      return [item.id, item.name, item.principal, positionStatus[item.status], item.maturity, next?.date ?? '', next?.amount ?? ''];
+    });
     return '\uFEFF' + [headings, ...rows].map(csv).join('\r\n') + '\r\n';
   }
 

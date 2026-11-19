@@ -380,8 +380,11 @@ async function leadView(id) {
   const { lead, notes, activity, recipients, campaign } = await api('/api/leads/' + id);
   const { role } = state.user;
   const owner = role === 'admin' || lead.owner_id === state.user.id;
-  const move = { new: [['contacted', 'Označit jako kontaktovanou'], ['closed', 'Uzavřít']], contacted: [['qualified', 'Kvalifikovat'], ['closed', 'Uzavřít']],
-    qualified: [['handed', 'Předat klientovi'], ['closed', 'Uzavřít']], handed: [['closed', 'Uzavřít']] };
+  const move = {
+    new: ['contacted', 'Označit jako kontaktovanou'],
+    contacted: ['qualified', 'Kvalifikovat'],
+    qualified: ['handed', campaign ? 'Předat klientovi' : 'Zaznamenat předání mimo LeadForce'],
+  };
   const editable = role === 'admin' || (role === 'agent' && ['new', 'contacted'].includes(lead.stage)) || (role === 'care' && ['qualified', 'handed'].includes(lead.stage));
   const assignment = ['qualified', 'handed'].includes(lead.stage) ? 'care' : 'agent';
   const base = { id: lead.id, version: lead.version };
@@ -397,9 +400,12 @@ async function leadView(id) {
   if (role === assignment && lead.stage !== 'closed' && (!lead.owner_id || (role === 'care' && lead.owner_role === 'agent'))) {
     controls.push(actionButton('Převzít poptávku', () => command('assign', base), 'primary'));
   }
-  if (owner && editable && move[lead.stage]) {
-    const next = move[lead.stage].filter(([stage]) => stage !== 'closed');
-    if (next.length) controls.push(actions(next.map(([stage, title]) => actionButton(title, () => command('change-stage', { ...base, stage }), 'primary'))));
+  if (owner && editable && lead.stage !== 'closed') {
+    const next = move[lead.stage];
+    if (next) {
+      const [stage, title] = next;
+      controls.push(actions(actionButton(title, () => command('change-stage', { ...base, stage }), 'primary')));
+    }
     controls.push(node('details', { className: 'editable-block' }, node('summary', {}, 'Uzavřít poptávku'),
       form('Potvrdit uzavření', [field('Důvod uzavření', 'reason', closeReasons)],
         (data) => command('change-stage', { ...base, ...data, stage: 'closed' }, 'Poptávka byla uzavřena.'))));
@@ -939,7 +945,7 @@ function positions(isInvestor) {
     ...(isInvestor ? [] : [row.status === 'active' ? actionButton('Uzavřít', () => {
       if (window.confirm('Označit pozici jako splacenou?')) return command('close-position', { id: row.id });
     }) : '—'])]);
-  const columns = ['Projekt', ...(isInvestor ? [] : ['Investor']), 'Kapitál', 'Splatnost', 'Stav', ...(isInvestor ? [] : ['Akce'])];
+  const columns = ['Projekt', ...(isInvestor ? [] : ['Investor']), 'Investovaná částka', 'Splatnost', 'Stav', ...(isInvestor ? [] : ['Akce'])];
   const output = [heading(isInvestor ? 'Moje portfolio' : 'Pozice investorů',
     isInvestor && rows.length ? csvLink('Stáhnout portfolio CSV', '/api/export/portfolio.csv', 'portfolio.csv') : null),
   node('section', { className: 'card' }, table(columns, rows, 'Zatím žádné pozice.'))];

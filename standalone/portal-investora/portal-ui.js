@@ -313,7 +313,7 @@
     $('payment-amount').textContent = summary.next ? showCurrency(summary.next.amount) : '—';
     $('payment-project').replaceChildren(...(summary.next
       ? [date(summary.next.date), element('span', summary.next.position.name)]
-      : ['Žádná naplánovaná platba.']));
+      : ['Žádná nadcházející platba.']));
     $('payment-detail').hidden = !summary.next;
   }
 

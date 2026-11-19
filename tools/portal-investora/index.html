@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Portfolio, harmonogram plateb, příležitosti a komunikace v Portálu investora.">
   <title>Portál investora</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-K2qo60j0o6cNBh0bQqxWwJ7jdhX+wnC78LwEjfTAD+c='; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-vKhqDAm2rR4SLSXeqbuxAmkDmoKHJM7giM0M6C8VbNk='; style-src 'unsafe-inline'; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <!--
 Portál investora
 Copyright 2026 Michal Machalik
@@ -780,6 +780,8 @@ select.filter-select:has(option:checked:not([value="all"]):not([value=""])) { bo
   let { positions = [], opportunities = [], baseMessages = [], journeyMessages = [] } = fixtures ?? {};
 
   const stateKey = 'portal-investora.demo.v1';
+  const pragueDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Prague' });
+  const today = () => pragueDay.format(new Date());
   const knownIds = (values, allowed) => new Set(Array.isArray(values) ? values.filter((id) => allowed.has(id)) : []);
   const defaultState = () => ({ saved: new Set(), interest: new Set(), read: new Set(fixtures?.read) });
 
@@ -873,9 +875,10 @@ select.filter-select:has(option:checked:not([value="all"]):not([value=""])) { bo
       .sort((first, second) => first.date.localeCompare(second.date) || first.position.id.localeCompare(second.position.id));
   }
 
-  function portfolio() {
+  function portfolio(from = today()) {
     const active = positions.filter((position) => position.status === 'active');
-    return { active, invested: sumMoney(active, 'principal'), next: paymentSchedule(active)[0] };
+    const next = paymentSchedule(active).find((payment) => payment.date >= from);
+    return { active, invested: sumMoney(active, 'principal'), next };
   }
 
   const sumCents = (rows, field) => rows.reduce((sum, row) => sum + Math.round(row[field] * 100), 0);
@@ -894,14 +897,17 @@ select.filter-select:has(option:checked:not([value="all"]):not([value=""])) { bo
   }
 
   const positionStatus = { active: 'Aktivní', closed: 'Splacená' };
-  function exportPortfolio(entries) {
+  function exportPortfolio(entries, from = today()) {
     const csv = (cells) => cells.map((value) => {
       const text = String(value);
       const escaped = /^[\s\uFEFF]*[=+\-@]/.test(text) ? `'${text}` : text;
       return `"${escaped.replaceAll('"', '""')}"`;
     }).join(';');
     const headings = ['ID pozice', 'Projekt', 'Vložená částka CZK', 'Stav', 'Datum splatnosti', 'Nejbližší platba', 'Částka platby CZK'];
-    const rows = entries.map((item) => [item.id, item.name, item.principal, positionStatus[item.status], item.maturity, item.schedule[0]?.date ?? '', item.schedule[0]?.amount ?? '']);
+    const rows = entries.map((item) => {
+      const next = item.status === 'active' ? item.schedule.find((payment) => payment.date >= from) : undefined;
+      return [item.id, item.name, item.principal, positionStatus[item.status], item.maturity, next?.date ?? '', next?.amount ?? ''];
+    });
     return '\uFEFF' + [headings, ...rows].map(csv).join('\r\n') + '\r\n';
   }
 
@@ -1251,7 +1257,7 @@ select.filter-select:has(option:checked:not([value="all"]):not([value=""])) { bo
     $('payment-amount').textContent = summary.next ? showCurrency(summary.next.amount) : '—';
     $('payment-project').replaceChildren(...(summary.next
       ? [date(summary.next.date), element('span', summary.next.position.name)]
-      : ['Žádná naplánovaná platba.']));
+      : ['Žádná nadcházející platba.']));
     $('payment-detail').hidden = !summary.next;
   }
 

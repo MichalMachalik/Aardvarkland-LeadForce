@@ -34,6 +34,7 @@ async function verify() {
   async function open(viewport, disableStorage = false) {
     const context = await browser.newContext({ viewport, offline: url.startsWith('file:') });
     const page = await context.newPage();
+    await page.clock.setFixedTime(new Date('2026-11-20T10:00:00Z'));
     page.setDefaultTimeout(8500);
     page.setDefaultNavigationTimeout(20000);
     page.on('pageerror', (error) => errors.push(error.message));
@@ -242,6 +243,12 @@ async function verify() {
     await mobile.getByRole('button', { name: 'Zavřít' }).click();
     await mobile.getByLabel('Pouze uložené').check();
     assert.equal(await mobile.locator('.opportunity').count(), 1);
+
+    await page.clock.setFixedTime(new Date('2027-04-24T10:00:00Z'));
+    await page.goto(`${url}#prehled`);
+    await page.reload();
+    assert.equal(await page.locator('#payment-project').textContent(), 'Žádná nadcházející platba.');
+    assert.equal(await payment.isVisible(), false);
     assert.deepEqual(errors, []);
     assert.ok(requests.every((request) => request === url), requests.join('\n'));
     console.log(`PASS ${engine}: portfolio and CSV, opportunity search and state, inbox, reset, keyboard, mobile, blocked storage`);
