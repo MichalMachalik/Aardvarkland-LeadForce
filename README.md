@@ -1,112 +1,50 @@
 # Aardvarkland LeadForce
 
-Pracovní prostor pro tým, který měří kampaně, kvalifikuje poptávky a navazuje péčí o investory. Audit kampaní a Kontrola před spuštěním jsou dostupné týmu z přehledu. Klient sleduje předané poptávky a náklady podle kampaní. Investor má vlastní portfolio a schránku.
+CRM pro zpracování poptávek od kampaně přes kvalifikaci a předání klientovi až po péči o investora.
 
-[Veřejné demo](https://michalmachalik.github.io/Aardvarkland-LeadForce/) · [Produktová analýza](ANALYZA.md) · [Plán dalších vydání](ROADMAP.md)
+[Týmový prostor](https://michalmachalik.github.io/Aardvarkland-LeadForce/) · [Audit kampaní](https://michalmachalik.github.io/Aardvarkland-LeadForce/audit-kampani/) · [Kontrola před spuštěním](https://michalmachalik.github.io/Aardvarkland-LeadForce/kontrola-pred-spustenim/) · [Portál investora](https://michalmachalik.github.io/Aardvarkland-LeadForce/portal-investora/)
 
-Samostatné ukázky se sestavují ze zdrojů v `standalone/`. [Audit kampaní](https://michalmachalik.github.io/Aardvarkland-LeadForce/audit-kampani/) · [Kontrola před spuštěním](https://michalmachalik.github.io/Aardvarkland-LeadForce/kontrola-pred-spustenim/) · [Portál investora](https://michalmachalik.github.io/Aardvarkland-LeadForce/portal-investora/)
+## Architektura
 
-## Veřejné demo
+- Server běží na Node.js 24+ a používá HTTP API, SQLite (`node:sqlite`) a frontend v `public/`. Přístup oddělují role správce, marketing, kvalifikace, péče, klient a investor.
+- GitHub Pages sestavuje stejná doménová pravidla do samostatného workeru se SQLite přes sql.js. Fiktivní záznamy a změny se ukládají do IndexedDB v profilu prohlížeče. Role lze zkoušet současně v několika kartách. Pozvánky fungují uvnitř stejného profilu. Import Google Ads používá simulované odpovědi.
+- Pracovní postupy zahrnují předání a reklamace s přiřazením řešitele, interní audit, klientské uzávěrky s historií verzí a investorské portfolio se zprávami. Lhůty reklamací se počítají v pracovní době `Europe/Prague` s vynecháním víkendů a svátků. Předání reklamace mezi řešiteli termín zachová.
 
-Vyberte jednu ze šesti rolí. Volba **Otevřít další roli** otevře nový panel. Každý panel má vlastní přihlášení a uživatelé ve stejném prohlížeči pracují nad společnými záznamy. Údaje i změny se ukládají v tomto profilu prohlížeče, kde přežijí obnovení stránky. Další návštěvníci mají vlastní prostor. Na přihlašovací stránce lze obnovit výchozí data.
+## Lokální server
 
-Pro ukázku používejte smyšlené údaje a e-maily s koncovkou `.example`. Pozvánka funguje v jiném panelu stejného profilu prohlížeče. K vyzkoušení jiného zařízení nebo identit v oddělených prohlížečích slouží serverová verze. Veřejná ukázka žádné zprávy neposílá.
+Vyžaduje Node.js 24+. Interaktivní nastavení založí organizaci a správce v prázdné databázi. Schéma databáze se aktualizuje při otevření. Další účty přidává správce pozvánkou.
 
-### Průchod od kampaně k investorovi
-
-1. V **Marketingu** vytvořte poptávku s projektem, kanálem a ID kampaně.
-2. V **Kvalifikaci** otevřete poptávku, převezměte ji a změňte stav na kontaktovanou. Přidejte interní poznámku, vyberte kolegu pro upozornění a poptávku kvalifikujte.
-3. V **Péči** zkontrolujte poznámku a převezměte poptávku. U vlastní kampaně použijte **Zaznamenat předání mimo LeadForce**. U klientské kampaně tlačítko **Předat klientovi** zpřístupní poptávku i v účtu klienta. Poté propojte účet investora. Pokud chybí, vznikne odkaz na jednorázovou pozvánku.
-4. V dalším panelu založte účet z pozvánky. Z **Péče** přidejte tomuto účtu pozici a zveřejněte koncept zprávy. V účtu investora otevřete portfolio a zprávu. Stav přečtení se objeví po obnovení přehledu na straně péče.
-5. Ve **Správě** projděte uživatele, historii organizace a upozornění. **Marketing** může stáhnout CSV pro import do Auditu. Export obsahuje identifikátor poptávky, kanál, kampaň, stav a data, jména a e-maily v něm chybí.
-
-Fronta poptávek hledá ve všech dostupných záznamech a stránkuje výsledky. Oprávněný zpracovatel může opravit kontakt, upravit nebo znovu otevřít úkol a uzavřít poptávku s důvodem. U předání zůstává původní datum pro report. U úkolů deaktivovaného pracovníka přebírá otevřenou práci správce. Historie zapisuje provedené změny.
-
-Investor v **Portfoliu** stáhne přehled svých pozic jako CSV. Ve **Zprávách** může odpovědět do vlákna. Péče může koncept upravit, zahodit nebo zveřejnit a v publikovaném vlákně odpovědět. Stav přečtení a počet nových odpovědí se aktualizují po otevření vlákna.
-
-### Průchod klientským reportem
-
-1. V roli **Klient** otevřete přehled fiktivního Lípového bydlení. Vyberte kampaň **Byty pod Lípou**. Čerstvé výchozí demo ukazuje 1 890 Kč, dvě předání a 945 Kč za předání.
-2. V roli **Marketing** nebo **Správce** otevřete **Klienti a kampaně** a upravte denní náklad. Stejný den a kampaň se přepíší. Historie správce zapisuje původní i novou částku.
-3. Při zakládání nové poptávky vyberte klientskou kampaň. Projekt, kanál a ID se převezmou z kampaně. Správce může kampaň přiřadit i starší poptávce před předáním. Po změně stavu na **Předaná** a obnovení přehledu uvidí klient nový kontakt ve svém účtu.
-4. V klientském účtu vyzkoušejte filtr do minulosti a stáhněte CSV. Souhrnný soubor obsahuje kampaně, výdaje a počty předání. Kontaktní údaje zůstávají v klientském přehledu.
-
-Report počítá evidovaný výdaj v Kč dělený počtem skutečných předání ve stejném období. Oba konce období jsou zahrnuté a den předání odpovídá časovému pásmu Praha. Kampaň bez výdajů v evidenci se zobrazí jako **Bez evidence**. Zadaná nula je platný náklad. Pokud u kampaně s předáním výdaj chybí, souhrnný náklad na předání se nevyčíslí. U výdajů doplněných jen zčásti report ukazuje evidovaný součet. Uzavření dříve předané poptávky zachová historické předání.
-
-Správce vytvoří klienta v **Klienti a kampaně** a v **Uživatelích** zvolí roli **Klient** a konkrétního klienta. Všichni pozvaní uživatelé tohoto klienta uvidí stejný přehled. Výběr kampaně ani export nezpřístupňuje záznamy jiného klienta.
-
-### Měsíční uzávěrky
-
-Marketing a správce v **Měsíčních uzávěrkách** načtou podklady za vybraného klienta a uzavřený měsíc. Nevykázané dny Google Ads lze vyřešit importem nebo ručním doplněním nákladu pro chybějící den. Ručně ověřený náklad se použije i při výpadku zdroje, který zachoval starší částku.
-
-Správce zveřejní ověřený náhled. Při pozdější opravě nákladu načte nové podklady a zveřejní další verzi s důvodem. Klient najde v archivu starší i aktuální verze a může vyexportovat každou z nich. Archiv obsahuje souhrny kampaní bez kontaktních údajů. Čerstvé demo obsahuje jednu fiktivní uzávěrku.
-
-### Potvrzení převzetí a reklamace
-
-1. Jako **Klient** otevřete v tabulce **Předané poptávky** detail kontaktu **Zuzana Šedá**. Použijte **Potvrdit převzetí**.
-2. V detailu vyberte důvod reklamace a případně připište popis. Pro **Jiný důvod** je popis povinný. Podání se objeví v detailu klienta i ve frontě týmu.
-3. Jako **Péče · Klára Dvořáková** otevřete **Čeká na reakci** a vezměte reklamaci. Tlačítkem **Vyžádat podklady** odešlete klientovi dotaz přímo ve vlákně. Můžete ji také předat uživateli **Martin Jelínek**, přidat důvod a otevřít jeho roli v další kartě. Martin případ najde v **Mých reklamacích** i během čekání na klienta.
-4. Jako **Klient** otevřete **Čeká na reakci**, vyberte případ a použijte **Doplnit podklady**. Na čerstvě otevřeném demu lze tenhle krok vyzkoušet rovnou u kontaktu **Hana Vítová**.
-5. Doplněný případ se vrátí do fronty týmu. Při potřebě dalších podkladů lze postup zopakovat. Po uložení rozhodnutí zůstává výsledek i celé vlákno v detailu. Filtr **Vyřízené reklamace** zobrazí uznané i zamítnuté případy.
-
-**Lhůty na reakci.** Výchozí pracovní doba je od pondělí do pátku od 08:00 do 16:00 v časovém pásmu Praha. Tým má 24 pracovních hodin od podání reklamace nebo od doplnění podkladů klientem. Převzetí reklamace původní termín zachová. Vyžádáním podkladů přechází odpočet na klienta, který má 72 pracovních hodin na odpověď. Víkendy, [české svátky včetně Velkého pátku a Velikonočního pondělí](https://e-sbirka.gov.cz/eli/cz/sb/2000/245/2026-05-13) a vložené dny volna se vynechávají. Po vypršení lhůty lze stále odpovědět nebo uložit rozhodnutí.
-
-Správce může v **Lhůtách reklamací** změnit pracovní dobu, obě lhůty a doplnit mimořádné dny volna. Nastavení platí pro danou organizaci. Po uložení se termíny otevřených případů přepočítají od začátku aktuálního kola. Na dříve otevřené kartě se po zjištění změny zobrazí výzva k obnovení zobrazení.
-
-Prošlé otevřené případy se zobrazí v **Eskalacích reklamací** u správce a členů péče s přístupem k danému předání. Fronta uvádí termín i stranu, od které se čeká na reakci. Podle aktuálního termínu se počty v aplikaci obnovují při návratu na kartu a průběžně při jejím otevření. Obsah vlákna se načte znovu tlačítkem **Obnovit detail**. V čerstvém demu najde role **Péče** případ **Hana Vítová** už po lhůtě. Po odpovědi klienta se vrátí mezi běžné případy na reakci týmu s novým termínem.
-
-Potvrzení je jednorázové. U jednoho předání může tým současně řešit jednu reklamaci. Další podání po vyřízení vytvoří nový případ a starší rozhodnutí zůstává v historii. V přehledu péče jsou předání tohoto pracovníka a případy bez aktivního vlastníka. Správce vidí předání v celé organizaci. Vyjádření k reklamaci je součást klientského detailu, interní poznámky CRM zůstávají v týmové evidenci. Původní datum a počet předání pro výpočet kampaní vycházejí ze skutečně evidovaného předání.
-
-Správce může přiřadit otevřenou reklamaci aktivnímu členu péče nebo správci stejné organizace. Řešitel ji může předat s důvodem nebo vrátit do fronty **Bez řešitele**. Při deaktivaci účtu se jeho otevřené reklamace vrátí do fronty automaticky. Při změně řešitele zůstává termín, původní čas převzetí a rozepsaná odpověď na stejný požadavek. Nový řešitel dostane případ i s dosavadním vláknem a interní historií předání. **Moje reklamace** ukazují i případy čekající na klienta. Prošlé případy vidí ve frontě eskalací aktuální řešitel a správce.
-
-### Pilot importu Google Ads
-
-1. V roli **Marketing** otevřete **Klienti a kampaně**. Pod **Import Google Ads** je připravená kampaň **Byty pod Lípou**.
-2. Ponechte tři poslední uzavřené dny a scénář **Chybějící den**. **Synchronizovat náklady** automaticky zpracuje simulovanou odpověď. Objeví se dva nové dny včetně potvrzené nuly a jeden nevykázaný den.
-3. Opakujte stejný import. Nové i opravené záznamy zůstanou na nule. Zvolte **Doplněná data** pro obnovu chybějícího dne nebo **Opravený náklad** pro změnu již zpracované částky.
-4. V roli **Klient** si obnovte přehled. U nevykázaného dne má report poznámku a cena za předání se dopočítá po doplnění. Poslední známý náklad zůstane v evidenci i při opětovném vynechání dne.
-
-Import mapuje konkrétní účet a kampaň, čte denní `metrics.cost_micros` a částky převádí na haléře. Pro jeden den použije poslední známý importovaný náklad nebo případný ruční podklad. Opakovaná odpověď nenavyšuje výdaje. Zcela chybějící řádek je nevykázaný den. Google Ads může nulové řádky vynechat, proto takový den zůstává otevřený k ověření. [Google Ads – denní segmentace a nulové metriky](https://developers.google.com/google-ads/api/docs/reporting/zero-metrics)
-
-## Spuštění čisté verze
-
-Po instalaci Node.js 24 nebo novější spusťte nastavení a aplikaci v interaktivním terminálu.
-
-```powershell
+```sh
 node setup.mjs
 npm start
 ```
 
-Nastavení se zeptá na název a identifikátor organizace, jméno a e-mail správce a heslo (nejméně 12 znaků). Otevřete [přihlášení](http://127.0.0.1:4190/) a použijte zadané údaje. Správce pozve další uživatele přes **Uživatelé**. Pozvánku lze použít jednou během 24 hodin a do přijetí ji lze zrušit. Odkaz se kopíruje v aplikaci a předává se mimo ni. Správce může vytvořit také jednorázový odkaz na obnovu hesla. Platí 30 minut a nastavení nového hesla ukončí předchozí relace. Při prvním spuštění jsou klienti, kampaně, náklady, poptávky, pozice i zprávy prázdné. SQLite soubor se vytvoří při prvním nastavení nebo spuštění služby. U stávající instalace se při otevření databáze doplní schéma a zachovají se stávající záznamy.
+Server běží na [portu 4190](http://127.0.0.1:4190/). `npm run demo` spustí místní demo s fiktivními daty na portu 4191.
 
-| Nastavení | Účel |
+| Proměnná | Nastavení |
 | --- | --- |
-| `WORKSPACE_DATA` | Absolutní cesta k databázi. Výchozí umístění je `data/workspace.sqlite` ve složce aplikace. Použijte stejnou cestu pro nastavení a následný start. |
-| `WORKSPACE_PORT` | Místní port. Výchozí port čisté verze je 4190, port dema je 4191. |
-| `WORKSPACE_ORIGIN` | HTTPS adresa v případě nasazení za reverzní proxy, bez cesty nebo parametrů. Pro místní start se odvodí z portu. |
+| `WORKSPACE_DATA` | Cesta k trvalé SQLite databázi. Výchozí hodnota je `data/workspace.sqlite`. |
+| `WORKSPACE_PORT` | Port lokální služby. |
+| `WORKSPACE_ORIGIN` | Veřejný HTTPS původ bez cesty při nasazení za proxy. |
 
-Služba poslouchá pouze na `127.0.0.1`. Pro nasazení potřebuje vlastní HTTPS doménu, reverzní proxy, trvalý disk a spravovaný proces. Proxy musí předávat hlavičku `Origin` a měla by samostatně omezovat počet požadavků na přihlašovací trasy. Aplikace omezuje pokusy podle bezprostředního síťového protějšku, který je při tomto nasazení proxy. Endpoint `/health` ověřuje běh HTTP procesu a `/ready` navíc ověřuje čtení databáze.
+Pro síťové nasazení použijte HTTPS proxy a trvalý disk. Proxy předává hlavičku Origin a omezuje požadavky na přihlášení. `/health` ověřuje HTTP proces, `/ready` také čtení databáze. `npm run backup -- cesta-k-nove-zaloze.sqlite` vytvoří ověřený snímek.
 
-Příkaz `npm run backup -- cesta-k-nove-zaloze.sqlite` vytvoří ověřený SQLite snímek i za běhu služby. Cílová složka musí existovat a podporovat pevné odkazy. Příkaz existující cílový soubor nepřepisuje. Pro zkušební obnovu pracujte s kopií zálohy a spusťte samostatnou instanci s vlastní cestou `WORKSPACE_DATA` a jiným portem. Přístup k datovému adresáři, zálohám a propojeným nástrojům svěřte oprávněným uživatelům. Importované soubory pracují v oddělených nástrojích v prohlížeči.
+## Google Ads
 
-### Zapnutí serverového zdroje
+Serverový konektor používá `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` a `GOOGLE_ADS_REFRESH_TOKEN`. Volitelné jsou `GOOGLE_ADS_LOGIN_CUSTOMER_ID` a `GOOGLE_ADS_API_VERSION` (výchozí `v26`). Podporované účty mají měnu CZK a pásmo `Europe/Prague`.
 
-Google Ads se zapíná nastavením prostředí serveru. Použijte `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` a `GOOGLE_ADS_REFRESH_TOKEN`. Pro správcovský účet lze doplnit `GOOGLE_ADS_LOGIN_CUSTOMER_ID` bez pomlček. `GOOGLE_ADS_API_VERSION` standardně používá `v26`. Pilot podporuje účty v CZK a časové pásmo Europe/Prague. Služba používá přístupy k načtení metadat účtu a čísel kampaní. [Příklad dotazu Google Ads API](https://developers.google.com/google-ads/api/docs/reporting/example)
+Po napojení účtu a kampaně lze import spustit z rozhraní nebo příkazem `npm run sync:google-ads -- <organizace> [od do]`. Výchozí okno je sedm posledních uzavřených dní. Opakovaný import aktualizuje tentýž den a kampaň. Chybějící řádek zůstává k ověření. Cena za předání vychází z evidovaných výdajů a skutečných předání ve stejném období.
 
-V **Klienti a kampaně** vyberte Google Ads kampaň a přes **Napojit kampaň** přiřaďte ID účtu a ID reklamy. Synchronizaci lze vyvolat z rozhraní, případně stejný import opakovat z plánovače serveru.
+## Build a testy
 
-```powershell
-npm run sync:google-ads -- identifikator-organizace
+```sh
+npm ci
+npx playwright install chromium
+npm run test:release
 ```
 
-Bez zadaného období příkaz načítá posledních sedm uzavřených dnů. Volitelně přidejte dvě data ve formátu `RRRR-MM-DD` pro zpětné doplnění až 31 dnů. Příkaz vyžaduje stejnou cestu k databázi jako služba. Vrací chybu při nedostupnosti zdroje nebo nevykázaném dni. Připojení ke skutečnému účtu vyžaduje nasazení a ověření jeho oprávnění.
-
-## Ověření
-
-Po `npm ci` a `npx playwright install chromium` spustí `npm run test:release` serverové testy, oba režimy aplikace v prohlížeči, všechny tři samostatné nástroje i průchod mezi nimi. Stejná kontrola předchází nasazení na GitHub Pages. Pro jednotlivý průchod slouží `test/browser.cjs`. `TEST_URL` umožňuje ověřit veřejné sestavení, `TEST_ENGINE` vybírá `chromium`, `firefox` nebo `webkit`. `npm run demo` spustí místní serverovou ukázku na portu 4191.
-
-Příkazy `npm ci` a `npm run build` vytvoří v `dist/` statický build. Prohlížeč používá stejný model a pravidla jako server v samostatném workeru se SQLite a ukládá stav do IndexedDB. Build neobsahuje žádný serverový datový soubor.
+`npm run build` sestaví týmový prostor a tři nástroje ze `standalone/` do `dist/`. Před nasazením na GitHub Pages běží serverové a prohlížečové testy. [Analýza](ANALYZA.md) · [Plán vývoje](ROADMAP.md)
 
 ## Licence
 
-Apache-2.0. Písmo Inter, sql.js a kryptografická knihovna mají vlastní licence přiložené v sestavení.
+[Apache-2.0](LICENSE) · [NOTICE](NOTICE)
