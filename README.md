@@ -43,7 +43,14 @@ npx playwright install chromium
 npm run test:release
 ```
 
-`npm run build` sestaví týmový prostor a tři nástroje ze `standalone/` do `dist/`. Před nasazením na GitHub Pages běží serverové a prohlížečové testy. [Analýza](ANALYZA.md) · [Plán vývoje](ROADMAP.md)
+`npm run test:release` prověří doménová pravidla, sestaví web a spustí uživatelské scénáře v prohlížeči. Stejný balíček lze sestavit samostatně a otevřít na [localhostu](http://127.0.0.1:4192/).
+
+```sh
+npm run build
+python -m http.server 4192 --bind 127.0.0.1 --directory dist
+```
+
+V kořeni je týmový prostor. Cesty `audit-kampani/`, `kontrola-pred-spustenim/` a `portal-investora/` otevírají jednotlivé nástroje přímo. [Analýza](ANALYZA.md) · [Plán vývoje](ROADMAP.md)
 
 ## Licence
 
